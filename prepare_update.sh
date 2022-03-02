@@ -1,5 +1,5 @@
 #!/bin/bash
-rm controls.txt
+rm controls_fhem_fordpass.txt
 while IFS= read -r -d '' FILE
 do
   TIME=$(git log --pretty=format:%cd -n 1 --date=iso -- "$FILE")

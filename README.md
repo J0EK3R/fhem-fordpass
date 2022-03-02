@@ -5,7 +5,7 @@ fhem module to connect to Fordpass-cloud.
 https://wiki.fhem.de/wiki/Update
 
 ## add repository to fhem
-update add https://raw.githubusercontent.com/J0EK3R/fhem-fordpass/master/controls.txt
+update add https://raw.githubusercontent.com/J0EK3R/fhem-fordpass/master/controls_fhem_fordpass.txt
 
 ## list all repositories
 update list
