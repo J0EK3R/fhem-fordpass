@@ -128,7 +128,7 @@ sub FordpassVehicle_Initialize($)
   $hash->{SetFn}    = \&FordpassVehicle_Set;
   $hash->{ParseFn}  = \&FordpassVehicle_Parse;
 
-  $hash->{Match} = "^FordpassVehicle_.*";
+  $hash->{Match} = "^FORDPASSVEHICLE_.*";
   
   # list of attributes has changed from V2 -> V3
   # -> the redefinition is done automatically
