@@ -1,5 +1,3 @@
 FHEM fordpass last changes:
 2022-03-02
- - project init
-
-first upload of files
+ - renamed controls.txt to controls_fhem_fordpass
