@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.1";
+my $VERSION = "0.0.2";
 
 use strict;
 use warnings;
@@ -77,6 +77,8 @@ sub FordpassVehicle_GetApplianceCommand($;$$);
 sub FordpassVehicle_SetCommand($$$;$$);
 
 sub FordpassVehicle_RefreshReadingsFromObject($$$);
+
+sub FordpassVehicle_GetHTMLLocation($);
 
 sub FordpassVehicle_Store($$$$);
 sub FordpassVehicle_Restore($$$$);
@@ -2569,6 +2571,29 @@ sub FordpassVehicle_RefreshReadingsFromObject($$$)
       readingsBulkUpdate($hash, makeReadingName($objectName), "$objectValue");
     }
   }
+}
+
+
+sub FordpassVehicle_GetHTMLLocation($)
+{
+#  <iframe width="700" height="500" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" src="http://m.osmtools.de/?lon=9&lat=49&zoom=6&mlon=10.527099609314&mlat=48.674597772512&icon=4&iframe=1" ></iframe>
+  my ($name) = @_;
+
+  my $url = "http://m.osmtools.de/?" .
+                "zoom=15" . 
+                "&lon=" . ReadingsVal($name, "Location_Longitude", 0) . 
+                "&mlon=" . ReadingsVal($name, "Location_Longitude", 0) .
+                "&lat=" . ReadingsVal($name, "Location_Latitude", 0) . 
+                "&mlat=" . ReadingsVal($name, "Location_Latitude", 0) .
+                "&icon=4" .
+                "&iframe=1";
+
+
+  return "<iframe " .
+    "width=\"700\" " .
+    "height=\"500\" " .
+    "src=\"" . $url . "\" " .
+    "></iframe>";
 }
 
 ##################################
