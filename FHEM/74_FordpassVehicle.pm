@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.2";
+my $VERSION = "0.0.3";
 
 use strict;
 use warnings;
@@ -78,11 +78,11 @@ sub FordpassVehicle_SetCommand($$$;$$);
 
 sub FordpassVehicle_RefreshReadingsFromObject($$$);
 
-sub FordpassVehicle_GetHTMLLocation($);
-
 sub FordpassVehicle_Store($$$$);
 sub FordpassVehicle_Restore($$$$);
 sub FordpassVehicle_StoreRename($$$$);
+
+sub FordpassVehicle_GetHTMLLocation($);
 
 #########################
 # Constants
@@ -2574,28 +2574,6 @@ sub FordpassVehicle_RefreshReadingsFromObject($$$)
 }
 
 
-sub FordpassVehicle_GetHTMLLocation($)
-{
-#  <iframe width="700" height="500" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" src="http://m.osmtools.de/?lon=9&lat=49&zoom=6&mlon=10.527099609314&mlat=48.674597772512&icon=4&iframe=1" ></iframe>
-  my ($name) = @_;
-
-  my $url = "http://m.osmtools.de/?" .
-                "zoom=15" . 
-                "&lon=" . ReadingsVal($name, "Location_Longitude", 0) . 
-                "&mlon=" . ReadingsVal($name, "Location_Longitude", 0) .
-                "&lat=" . ReadingsVal($name, "Location_Latitude", 0) . 
-                "&mlat=" . ReadingsVal($name, "Location_Latitude", 0) .
-                "&icon=4" .
-                "&iframe=1";
-
-
-  return "<iframe " .
-    "width=\"700\" " .
-    "height=\"500\" " .
-    "src=\"" . $url . "\" " .
-    "></iframe>";
-}
-
 ##################################
 # FordpassVehicle_Store
 sub FordpassVehicle_Store($$$$)
@@ -2679,6 +2657,49 @@ sub FordpassVehicle_StoreRename($$$$)
   # delete old key
   setKeyValue($old_deviceKey, undef);
 }
+
+##################################
+# FordpassVehicle_GetHTMLLocation($name)
+sub FordpassVehicle_GetHTMLLocation($)
+{
+#  <iframe width="700" height="500" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" src="http://m.osmtools.de/?lon=9&lat=49&zoom=6&mlon=10.527099609314&mlat=48.674597772512&icon=4&iframe=1" ></iframe>
+  my ($name) = @_;
+
+ my $longitude = ReadingsVal($name, "Location_Longitude", "0");
+ my $latitude = ReadingsVal($name, "Location_Latitude", "0");
+
+  my $url = "http://m.osmtools.de/?" .
+   "zoom=15" . 
+   "&lon=" . $longitude . 
+   "&mlon=" . $longitude .
+   "&lat=" . $latitude . 
+   "&mlat=" . $latitude .
+   "&icon=4" .
+   "&iframe=1";
+
+  my $script = "<script> " .
+    "window.setInterval(\"reloadIFrame();\", 10000); " .
+    "function reloadIFrame() { document.getElementById(\"Map\").src=\"" . $url . "\"; } " .
+    "</script>";
+
+  return 
+    "<iframe " .
+    "id=\"Map\" " .
+    "name=\"Map\" " .
+    "width=\"700\" " .
+    "height=\"500\" " .
+    "frameborder=\"0\" " .
+    "scrolling=\"no\" " .
+    "marginheight=\"0\" " .
+    "marginwidth=\"0\" " .
+    "icon=\"1\" " .
+    "src=\"" . $url . "\" " .
+    "></iframe> " .
+    $script;
+    
+    
+}
+
 
 1;
 
