@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.3";
+my $VERSION = "0.0.4";
 
 use strict;
 use warnings;
@@ -112,6 +112,7 @@ my $FordpassVehicle_AttrList =
     "debugJSON:0,1 " . 
     "disable:0,1 " . 
     "interval " .
+    "mode:default,passive " .
     "genericReadings:none,valid,full " . 
     ""; 
 
@@ -215,6 +216,7 @@ sub FordpassVehicle_Define($$)
   $hash->{helper}{DEBUG}            = "0";
   $hash->{helper}{IsDisabled}       = "0";
   $hash->{helper}{GenericReadings}  = "none";
+  $hash->{helper}{Mode}             = "default";
 
   AssignIoPort($hash, $bridge);
 
@@ -366,6 +368,25 @@ sub FordpassVehicle_Attr(@)
       $hash->{helper}{GenericReadings} = "none";
 
       Log3($name, 3, "FordpassVehicle_Attr($name) - set genericReadings: none");
+    }
+    FordpassVehicle_UpdateInternals($hash);
+  }
+
+  # Attribute "mode"
+  if( $attrName eq "mode" )
+  {
+    if($cmd eq "set" and 
+      ($attrVal eq "default" or $attrVal eq "passive"))
+    {
+      $hash->{helper}{Mode} = $attrVal;
+
+      Log3($name, 3, "FordpassVehicle_Attr($name) - set mode: $attrVal");
+    } 
+    else
+    {
+      $hash->{helper}{Mode} = "default";
+
+      Log3($name, 3, "FordpassVehicle_Attr($name) - set genericReadings: default");
     }
     FordpassVehicle_UpdateInternals($hash);
   }
@@ -639,8 +660,9 @@ sub FordpassVehicle_UpdateInternals($)
   # debug-internals
   if($hash->{helper}{DEBUG} eq "1")
   {
-    $hash->{DEBUG_IsDisabled}                             = $hash->{helper}{IsDisabled};
-    $hash->{DEBUG_GenericReadings}                        = $hash->{helper}{GenericReadings};
+    $hash->{DEBUG_IsDisabled}       = $hash->{helper}{IsDisabled};
+    $hash->{DEBUG_GenericReadings}  = $hash->{helper}{GenericReadings};
+    $hash->{DEBUG_Mode}             = $hash->{helper}{Mode};
     
     my @retrystring_keys =  grep /Telegram_/, keys %{$hash->{helper}};
     foreach (@retrystring_keys)
@@ -721,27 +743,38 @@ sub FordpassVehicle_Update($)
   my ( $hash ) = @_;
   my $name     = $hash->{NAME};
 
-  Log3($name, 4, "FordpassVehicle_Update($name)");
+  if($hash->{Capability_TCU} eq "True")
+  {
+    Log3($name, 4, "FordpassVehicle_Update($name)");
 
-  # parallel call:
-  #FordpassVehicle_GetData_Last($hash);
-  #FordpassVehicle_GetApplianceCommand($hash);
-  #FordpassVehicle_GetStatusV2($hash);
-  #FordpassVehicle_GetDetails($hash);
-  
-  # serial call:
-#  my $getData             = sub { FordpassVehicle_GetData_Last($hash); };
-#  my $getApplianceCommand = sub { FordpassVehicle_GetApplianceCommand($hash, $getData); };
-#  my $getTest                 = sub { FordpassVehicle_GetTest($hash); };
-  my $getRecalls              = sub { FordpassVehicle_GetRecalls($hash); };
-  my $getFuelConsumptionInfo  = sub { FordpassVehicle_GetFuelConsumptionInfo($hash, $getRecalls); };
-  my $getCapability           = sub { FordpassVehicle_GetCapability($hash, $getFuelConsumptionInfo); };
-  my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getCapability); };
-  my $getStateV2              = sub { FordpassVehicle_GetStatusV2($hash, $getStateV4); };
-  my $refreshStateV2          = sub { FordpassVehicle_RefreshStatusV2($hash, $getStateV2); };
-  my $getDetails              = sub { FordpassVehicle_GetDetails($hash, $refreshStateV2); };
-  
-  $getDetails->();
+    if($hash->{helper}{Mode} eq "default")
+    {
+      # serial call:
+      #my $getRecalls              = sub { FordpassVehicle_GetRecalls($hash); };
+      my $getFuelConsumptionInfo  = sub { FordpassVehicle_GetFuelConsumptionInfo($hash); };
+      my $getCapability           = sub { FordpassVehicle_GetCapability($hash, $getFuelConsumptionInfo); };
+      my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getCapability); };
+      my $getStateV2              = sub { FordpassVehicle_GetStatusV2($hash, $getStateV4); };
+      my $refreshStateV2          = sub { FordpassVehicle_RefreshStatusV2($hash, $getStateV2); };
+      my $getDetails              = sub { FordpassVehicle_GetDetails($hash, $refreshStateV2); };
+      $getDetails->();
+    }
+    else
+    {
+      #my $getRecalls              = sub { FordpassVehicle_GetRecalls($hash); };
+      my $getFuelConsumptionInfo  = sub { FordpassVehicle_GetFuelConsumptionInfo($hash); };
+      my $getCapability           = sub { FordpassVehicle_GetCapability($hash, $getFuelConsumptionInfo); };
+      my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getCapability); };
+      my $getStateV2              = sub { FordpassVehicle_GetStatusV2($hash, $getStateV4); };
+      #my $refreshStateV2          = sub { FordpassVehicle_RefreshStatusV2($hash, $getStateV2); };
+      my $getDetails              = sub { FordpassVehicle_GetDetails($hash, $getStateV2); };
+      $getDetails->();
+    }
+  }
+  else
+  {
+    Log3($name, 5, "FordpassVehicle_Update($name) - Capability_TCU is False");
+  }
 }
 
 ##################################
@@ -2677,10 +2710,12 @@ sub FordpassVehicle_GetHTMLLocation($)
    "&icon=4" .
    "&iframe=1";
 
-  my $script = "<script> " .
-    "window.setInterval(\"reloadIFrame();\", 10000); " .
-    "function reloadIFrame() { document.getElementById(\"Map\").src=\"" . $url . "\"; } " .
-    "</script>";
+#  my $script = "<script> " .
+#    "window.setInterval(\"reloadIFrame();\", 10000); " .
+#    "function reloadIFrame() { document.getElementById(\"Map\").src=\"" . $url . "\"; } " .
+#    "</script>";
+
+  my $script = "<script> window.setTimeout( function() { window.location.reload(); }, 30000)</script>";
 
   return 
     "<iframe " .
@@ -2696,8 +2731,6 @@ sub FordpassVehicle_GetHTMLLocation($)
     "src=\"" . $url . "\" " .
     "></iframe> " .
     $script;
-    
-    
 }
 
 
