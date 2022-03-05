@@ -5,7 +5,7 @@
 #  (c) 2019 Copyright: J.K. (J0EK3R at gmx dot net)
 #  All rights reserved
 #
-#   Special thanks goes to comitters:
+#   Special thanks goes to committers:
 #
 #
 #  This script is free software; you can redistribute it and/or modify
@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.6";
+my $VERSION = "0.0.7";
 
 use strict;
 use warnings;
@@ -1725,51 +1725,51 @@ sub FordpassVehicle_GetStatusV4($;$$)
               readingsBulkUpdate($hash, "Tire_Status_System", "$currentVehiclestatus->{TPMS}->{tirePressureSystemStatus}->{value}")
                 if (defined($currentVehiclestatus->{TPMS}->{tirePressureSystemStatus}->{value}));
 
-              readingsBulkUpdate($hash, "Tire_Front_Pressure_Recommended", "$currentVehiclestatus->{TPMS}->{recommendedFrontTirePressure}->{value}")
+              readingsBulkUpdate($hash, "Tire_Front_Pressure_Recommended", $currentVehiclestatus->{TPMS}->{recommendedFrontTirePressure}->{value} / 10)
                 if (defined($currentVehiclestatus->{TPMS}->{recommendedFrontTirePressure}->{value}));
-              readingsBulkUpdate($hash, "Tire_Rear_Pressure_Recommended", "$currentVehiclestatus->{TPMS}->{recommendedRearTirePressure}->{value}")
+              readingsBulkUpdate($hash, "Tire_Rear_Pressure_Recommended", $currentVehiclestatus->{TPMS}->{recommendedRearTirePressure}->{value} / 10)
                 if (defined($currentVehiclestatus->{TPMS}->{recommendedRearTirePressure}->{value}));
     
               if (defined($currentVehiclestatus->{TPMS}->{leftFrontTireStatus}->{value}) and
                 $currentVehiclestatus->{TPMS}->{leftFrontTireStatus}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Tire_Front_Left_Status", "$currentVehiclestatus->{TPMS}->{leftFrontTireStatus}->{value}");
-                readingsBulkUpdate($hash, "Tire_Front_Left_Pressure", "$currentVehiclestatus->{TPMS}->{leftFrontTirePressure}->{value}");
+                readingsBulkUpdate($hash, "Tire_Front_Left_Pressure", $currentVehiclestatus->{TPMS}->{leftFrontTirePressure}->{value} / 100);
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{rightFrontTireStatus}->{value}) and
                 $currentVehiclestatus->{TPMS}->{rightFrontTireStatus}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Tire_Front_Right_Status", "$currentVehiclestatus->{TPMS}->{rightFrontTireStatus}->{value}");
-                readingsBulkUpdate($hash, "Tire_Front_Right_Pressure", "$currentVehiclestatus->{TPMS}->{rightFrontTirePressure}->{value}");
+                readingsBulkUpdate($hash, "Tire_Front_Right_Pressure", $currentVehiclestatus->{TPMS}->{rightFrontTirePressure}->{value} / 100);
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{outerLeftRearTireStatus}->{value}) and
                 $currentVehiclestatus->{TPMS}->{outerLeftRearTireStatus}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Tire_Rear_Left_Status", "$currentVehiclestatus->{TPMS}->{outerLeftRearTireStatus}->{value}");
-                readingsBulkUpdate($hash, "Tire_Rear_Left_Pressure", "$currentVehiclestatus->{TPMS}->{outerLeftRearTirePressure}->{value}");
+                readingsBulkUpdate($hash, "Tire_Rear_Left_Pressure", $currentVehiclestatus->{TPMS}->{outerLeftRearTirePressure}->{value} / 100);
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{outerRightRearTireStatus}->{value}) and
                 $currentVehiclestatus->{TPMS}->{outerRightRearTireStatus}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Tire_Rear_Right_Status", "$currentVehiclestatus->{TPMS}->{outerRightRearTireStatus}->{value}");
-                readingsBulkUpdate($hash, "Tire_Rear_Right_Pressure", "$currentVehiclestatus->{TPMS}->{outerRightRearTirePressure}->{value}");
+                readingsBulkUpdate($hash, "Tire_Rear_Right_Pressure", $currentVehiclestatus->{TPMS}->{outerRightRearTirePressure}->{value} / 100);
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{innerLeftRearTireStatus}->{value}) and
                 $currentVehiclestatus->{TPMS}->{innerLeftRearTireStatus}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Tire_Rear_InnerLeft_Status", "$currentVehiclestatus->{TPMS}->{innerLeftRearTireStatus}->{value}");
-                readingsBulkUpdate($hash, "Tire_Rear_InnerLeft_Pressure", "$currentVehiclestatus->{TPMS}->{innerLeftRearTirePressure}->{value}");
+                readingsBulkUpdate($hash, "Tire_Rear_InnerLeft_Pressure", $currentVehiclestatus->{TPMS}->{innerLeftRearTirePressure}->{value} / 100);
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{innerRightRearTireStatus}->{value}) and
                 $currentVehiclestatus->{TPMS}->{innerRightRearTireStatus}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Tire_Rear_InnerRight_Status", "$currentVehiclestatus->{TPMS}->{innerRightRearTireStatus}->{value}");
-                readingsBulkUpdate($hash, "Tire_Rear_InnerRight_Pressure", "$currentVehiclestatus->{TPMS}->{innerRightRearTirePressure}->{value}");
+                readingsBulkUpdate($hash, "Tire_Rear_InnerRight_Pressure", $currentVehiclestatus->{TPMS}->{innerRightRearTirePressure}->{value} / 100);
               }
             }
 

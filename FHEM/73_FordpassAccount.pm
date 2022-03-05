@@ -5,7 +5,7 @@
 #  (c) 2019 Copyright: J.K. (J0EK3R at gmx dot net)
 #  All rights reserved
 #
-#   Special thanks goes to comitters:
+#   Special thanks goes to committers:
 #
 #
 #  This script is free software; you can redistribute it and/or modify
@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.6";
+my $VERSION = "0.0.7";
 
 use strict;
 use warnings;
