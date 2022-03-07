@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.7";
+my $VERSION = "0.0.8";
 
 use strict;
 use warnings;
@@ -165,7 +165,7 @@ sub FordpassAccount_Define($$)
   return $@
     unless ( FHEM::Meta::SetInternals($hash) );
 
-  return "too few parameters: define <NAME> FordpassAccount"
+  return "wrong number of parameters: define <NAME> FordpassAccount"
     if ( @a != 2 );
 
   return "Cannot define FordpassAccount. Perl modul " . ${missingModul} . " is missing."

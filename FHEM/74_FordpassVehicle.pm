@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.7";
+my $VERSION = "0.0.8";
 
 use strict;
 use warnings;
@@ -82,6 +82,8 @@ sub FordpassVehicle_Store($$$$);
 sub FordpassVehicle_Restore($$$$);
 sub FordpassVehicle_StoreRename($$$$);
 
+sub FordpassVehicle_GetLTZFromUTC($);
+
 sub FordpassVehicle_GetHTMLLocation($);
 
 #########################
@@ -102,6 +104,7 @@ my $TOKEN_URL   = 'https://sso.ci.ford.com/oidc/endpoint/default/token';
 my $TimeStampFormat   = "%Y-%m-%dT%I:%M:%S";
 my $DefaultSeperator  = "_";
 my $DebugMarker       = "Dbg";
+my $TimestampMarker   = "_Timestamp";
 
 my %replacechartable = ("ä" => "ae", "Ä" => "Ae", "ü" => "ue", "Ü" => "Ue", "ö" => "oe", "Ö" => "Oe", "ß" => "ss" );
 my $replacechartablekeys = join ("|", keys(%replacechartable));
@@ -112,7 +115,8 @@ my $FordpassVehicle_AttrList =
     "debugJSON:0,1 " . 
     "disable:0,1 " . 
     "interval " .
-    "mode:default,passive " .
+    "refreshSatusMode:ignitionOn,never,always " .
+    "showTimestamps:0,1 " .
     "genericReadings:none,valid,full " . 
     ""; 
 
@@ -159,6 +163,9 @@ sub FordpassVehicle_Define($$)
 
   return $@
     unless(FHEM::Meta::SetInternals($hash));
+
+  return "wrong number of parameters: define <NAME> FordpassVehicle <FORDPASSACCOUNT> <VEHICLEID>"
+    if ( @a != 4 );
 
   return "Cannot define FordpassVehicle. Perl modul $missingModul is missing."
     if($missingModul);
@@ -208,15 +215,17 @@ sub FordpassVehicle_Define($$)
 #    $hash->{helper}{LastProcessedTimestamp_LUTC}            = FordpassVehicle_Restore( $hash, "FordpassVehicle_Define", "LastProcessedTimestamp_LUTC", $hash->{helper}{LastProcessedTimestamp_LUTC});
   }
   
-  $hash->{VEHICLEID}                = $vehicleId;
-  $hash->{VERSION}                  = $VERSION;
-  $hash->{NOTIFYDEV}                = "global,$name,$bridge";
-  $hash->{RETRIES}                  = 3;
-  $hash->{DataTimerInterval}        = $hash->{".DEFAULTINTERVAL"};
-  $hash->{helper}{DEBUG}            = "0";
-  $hash->{helper}{IsDisabled}       = "0";
-  $hash->{helper}{GenericReadings}  = "none";
-  $hash->{helper}{Mode}             = "default";
+  $hash->{VEHICLEID}                  = $vehicleId;
+  $hash->{VERSION}                    = $VERSION;
+  $hash->{NOTIFYDEV}                  = "global,$name,$bridge";
+  $hash->{RETRIES}                    = 3;
+  $hash->{DataTimerInterval}          = $hash->{".DEFAULTINTERVAL"};
+  $hash->{helper}{DEBUG}              = "0";
+  $hash->{helper}{IsDisabled}         = "0";
+  $hash->{helper}{GenericReadings}    = "none";
+  $hash->{helper}{ShowTimestamps}     = "0";
+  $hash->{helper}{RefreshStatusMode}  = "ignitionOn";
+  $hash->{helper}{IgnitionStatus}     = "Unknown";
 
   AssignIoPort($hash, $bridge);
 
@@ -327,9 +336,9 @@ sub FordpassVehicle_Attr(@)
   Log3($name, 4, "FordpassVehicle_Attr($name) - $attrName was called");
 
   # Attribute "disable"
-  if( $attrName eq "disable" )
+  if($attrName eq "disable")
   {
-    if( $cmd eq "set" and 
+    if($cmd eq "set" and 
       $attrVal eq "1" )
     {
       $hash->{helper}{IsDisabled} = "1";
@@ -349,12 +358,13 @@ sub FordpassVehicle_Attr(@)
       FordpassVehicle_TimerExecute($hash)
         if($init_done and
           not $hash->{helper}{DefineRunning});
+          
       Log3($name, 3, "FordpassVehicle($name) - enabled");
     }
   }
 
   # Attribute "genericReadings"
-  if( $attrName eq "genericReadings" )
+  elsif($attrName eq "genericReadings")
   {
     if($cmd eq "set" and 
       ($attrVal eq "valid" or $attrVal eq "full"))
@@ -372,19 +382,36 @@ sub FordpassVehicle_Attr(@)
     FordpassVehicle_UpdateInternals($hash);
   }
 
-  # Attribute "mode"
-  if( $attrName eq "mode" )
+  # Attribute "showTimestamps"
+  elsif($attrName eq "showTimestamps")
   {
-    if($cmd eq "set" and 
-      ($attrVal eq "default" or $attrVal eq "passive"))
+    if($cmd eq "set")
     {
-      $hash->{helper}{Mode} = $attrVal;
+      $hash->{helper}{ShowTimestamps} = "$attrVal";
+
+      Log3($name, 3, "FordpassVehicle_Attr($name) - set showTimestamps: $attrVal");
+    } 
+    else
+    {
+      $hash->{helper}{ShowTimestamps} = "0";
+
+      Log3($name, 3, "FordpassVehicle_Attr($name) - set showTimestamps: none");
+    }
+    FordpassVehicle_UpdateInternals($hash);
+  }
+
+  # Attribute "refreshSatusMode"
+  elsif($attrName eq "refreshSatusMode")
+  {
+    if($cmd eq "set")
+    {
+      $hash->{helper}{RefreshStatusMode} = $attrVal;
 
       Log3($name, 3, "FordpassVehicle_Attr($name) - set mode: $attrVal");
     } 
     else
     {
-      $hash->{helper}{Mode} = "default";
+      $hash->{helper}{RefreshStatusMode} = "never";
 
       Log3($name, 3, "FordpassVehicle_Attr($name) - set genericReadings: default");
     }
@@ -392,7 +419,7 @@ sub FordpassVehicle_Attr(@)
   }
 
   # Attribute "interval"
-  elsif( $attrName eq "interval" )
+  elsif($attrName eq "interval")
   {
     # onchange event for attribute "interval" is handled in sub "Notify" -> calls "updateValues" -> Timer is reloaded
     if($cmd eq "set")
@@ -516,6 +543,12 @@ sub FordpassVehicle_Set($@)
     FordpassVehicle_Update($hash);
     return;
   }
+  ### Command "refreshStatus"
+  elsif( lc $cmd eq lc "refreshStatus" )
+  {
+    FordpassVehicle_RefreshStatusV2($hash);
+    return;
+  }
   ### Command "clearreadings"
   elsif( lc $cmd eq lc "clearreadings" )
   {
@@ -549,6 +582,7 @@ sub FordpassVehicle_Set($@)
   {
     my $list = "";
     $list .= "update:noArg ";
+    $list .= "refreshStatus:noArg ";
 
     $list .= "engine:start,stop "
       if(defined($hash->{Capability_RemoteStart}) and 
@@ -560,7 +594,7 @@ sub FordpassVehicle_Set($@)
         $hash->{Capability_RemoteLock} or
         $hash->{helper}{DEBUG} eq "1");
 
-    $list .= "clearreadings:$DebugMarker.*,.* ";
+    $list .= "clearreadings:$DebugMarker.*,.*.$TimestampMarker,.* ";
 
     return "Unknown argument $cmd, choose one of $list";
   }
@@ -649,7 +683,7 @@ sub FordpassVehicle_Upgrade($)
 
 #####################################
 # FordpassVehicle_UpdateInternals( $hash )
-# This methode copies values from $hash-{helper} to visible intzernals 
+# This methode copies values from $hash-{helper} to visible internals 
 sub FordpassVehicle_UpdateInternals($)
 {
   my ( $hash ) = @_;
@@ -660,9 +694,11 @@ sub FordpassVehicle_UpdateInternals($)
   # debug-internals
   if($hash->{helper}{DEBUG} eq "1")
   {
-    $hash->{DEBUG_IsDisabled}       = $hash->{helper}{IsDisabled};
-    $hash->{DEBUG_GenericReadings}  = $hash->{helper}{GenericReadings};
-    $hash->{DEBUG_Mode}             = $hash->{helper}{Mode};
+    $hash->{DEBUG_IsDisabled}         = $hash->{helper}{IsDisabled};
+    $hash->{DEBUG_GenericReadings}    = $hash->{helper}{GenericReadings};
+    $hash->{DEBUG_ShowTimestamps}     = $hash->{helper}{ShowTimestamps};
+    $hash->{DEBUG_RefreshStatusMode}  = $hash->{helper}{RefreshStatusMode};
+    $hash->{DEBUG_IgnitionStatus}     = $hash->{helper}{IgnitionStatus};
     
     my @retrystring_keys =  grep /Telegram_/, keys %{$hash->{helper}};
     foreach (@retrystring_keys)
@@ -747,7 +783,8 @@ sub FordpassVehicle_Update($)
   {
     Log3($name, 4, "FordpassVehicle_Update($name)");
 
-    if($hash->{helper}{Mode} eq "default")
+    if(($hash->{helper}{RefreshStatusMode} eq "always") ||
+      ($hash->{helper}{RefreshStatusMode} eq "ignitionOn" && $hash->{helper}{IgnitionStatus} eq "1"))
     {
       # serial call:
       #my $getRecalls              = sub { FordpassVehicle_GetRecalls($hash); };
@@ -1635,68 +1672,132 @@ sub FordpassVehicle_GetStatusV4($;$$)
                 if (defined($currentVehiclestatus->{gps}->{latitude}));
               readingsBulkUpdate($hash, "Location_Longitude", "$currentVehiclestatus->{gps}->{longitude}")
                 if (defined($currentVehiclestatus->{gps}->{longitude}));
-              readingsBulkUpdate($hash, "Location_Timestamp", "$currentVehiclestatus->{gps}->{timestamp}")
-                if (defined($currentVehiclestatus->{gps}->{timestamp}));
+              
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Location" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{gps}->{timestamp}))
+                  if(defined($currentVehiclestatus->{gps}->{timestamp}));
+              }
             }
 
             if("$hash->{Capability_OilLife}" eq "True")
             {
-              readingsBulkUpdate($hash, "Oil_Status", "$currentVehiclestatus->{oil}->{oilLife}")
+              readingsBulkUpdate($hash, "Oil_Life_Status", "$currentVehiclestatus->{oil}->{oilLife}")
                 if (defined($currentVehiclestatus->{oil}->{oilLife}));
+                
               readingsBulkUpdate($hash, "Oil_Life_Percent", "$currentVehiclestatus->{oil}->{oilLifeActual}")
                 if (defined($currentVehiclestatus->{oil}->{oilLifeActual}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Oil_Life" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{oil}->{timestamp}))
+                  if(defined($currentVehiclestatus->{oil}->{timestamp}));
+              }
             }
 
             #if("$hash->{Capability_TirePressureMonitoring}" eq "True")
             {
               readingsBulkUpdate($hash, "Odometer", "$currentVehiclestatus->{odometer}->{value}")
                 if (defined($currentVehiclestatus->{odometer}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Odometer" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{odometer}->{timestamp}))
+                  if(defined($currentVehiclestatus->{odometer}->{timestamp}));
+              }
             }
 
-            #if (defined($currentVehiclestatus->{ignitionStatus}->{value})
+            if (defined($currentVehiclestatus->{ignitionStatus}->{value}))
             {
-              readingsBulkUpdate($hash, "Status_Ignition", "$currentVehiclestatus->{ignitionStatus}->{value}")
-                if (defined($currentVehiclestatus->{ignitionStatus}->{value}));
+              readingsBulkUpdate($hash, "Status_Ignition", "$currentVehiclestatus->{ignitionStatus}->{value}");
+              $hash->{helper}{IgnitionStatus} = $currentVehiclestatus->{ignitionStatus}->{value} eq "Run" ? "1" : "0";
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Status_Ignition" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{ignitionStatus}->{timestamp}))
+                  if(defined($currentVehiclestatus->{ignitionStatus}->{timestamp}));
+              }
             }
 
             #if (defined($currentVehiclestatus->{ignitionStatus}->{value})
             {
               readingsBulkUpdate($hash, "Status_Lock", "$currentVehiclestatus->{lockStatus}->{value}")
                 if (defined($currentVehiclestatus->{lockStatus}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Status_Lock" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{lockStatus}->{timestamp}))
+                  if(defined($currentVehiclestatus->{lockStatus}->{timestamp}));
+              }
             }
 
             #if (defined($currentVehiclestatus->{ignitionStatus}->{value})
             {
               readingsBulkUpdate($hash, "Status_Alarm", "$currentVehiclestatus->{alarm}->{value}")
                 if (defined($currentVehiclestatus->{alarm}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Status_Alarm" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{alarm}->{timestamp}))
+                  if(defined($currentVehiclestatus->{alarm}->{timestamp}));
+              }
             }
 
             #if (defined($currentVehiclestatus->{ignitionStatus}->{value})
             {
               readingsBulkUpdate($hash, "Status_FirmwareUpgrade_InProgress", "$currentVehiclestatus->{firmwareUpgInProgress}->{value}")
                 if (defined($currentVehiclestatus->{firmwareUpgInProgress}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Status_FirmwareUpgrade_InProgress" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{firmwareUpgInProgress}->{timestamp}))
+                  if(defined($currentVehiclestatus->{firmwareUpgInProgress}->{timestamp}));
+              }
             }
 
             #if (defined($currentVehiclestatus->{ignitionStatus}->{value})
             {
               readingsBulkUpdate($hash, "Status_DeepSleep_InProgress", "$currentVehiclestatus->{deepSleepInProgress}->{value}")
                 if (defined($currentVehiclestatus->{deepSleepInProgress}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Status_DeepSleep_InProgress" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{deepSleepInProgress}->{timestamp}))
+                  if(defined($currentVehiclestatus->{deepSleepInProgress}->{timestamp}));
+              }
             }
 
             #if (defined($currentVehiclestatus->{ignitionStatus}->{value})
             {
               readingsBulkUpdate($hash, "Status_OutAndAbout", "$currentVehiclestatus->{outandAbout}->{value}")
                 if (defined($currentVehiclestatus->{outandAbout}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Status_OutAndAbout" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{outandAbout}->{timestamp}))
+                  if(defined($currentVehiclestatus->{outandAbout}->{timestamp}));
+              }
             }
 
             #if("$hash->{Capability_TirePressureMonitoring}" eq "True")
             {
               readingsBulkUpdate($hash, "Battery_Health", "$currentVehiclestatus->{battery}->{batteryHealth}->{value}")
                 if (defined($currentVehiclestatus->{battery}->{batteryHealth}->{value}));
-              readingsBulkUpdate($hash, "Battery_Health_Timestamp", "$currentVehiclestatus->{battery}->{batteryHealth}->{timestamp}")
-                if (defined($currentVehiclestatus->{battery}->{batteryHealth}->{timestamp}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Battery_Health" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{battery}->{batteryHealth}->{timestamp}))
+                  if (defined($currentVehiclestatus->{battery}->{batteryHealth}->{timestamp}));
+              }
+                
               readingsBulkUpdate($hash, "Battery_Status_Actual", "$currentVehiclestatus->{battery}->{batteryStatusActual}->{value}")
                 if (defined($currentVehiclestatus->{battery}->{batteryStatusActual}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Battery_Status_Actual" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{battery}->{batteryStatusActual}->{timestamp}))
+                  if(defined($currentVehiclestatus->{battery}->{batteryStatusActual}->{timestamp}));
+              }
             }
 
             if("$hash->{Capability_RemoteStart}" eq "True")
@@ -1707,6 +1808,12 @@ sub FordpassVehicle_GetStatusV4($;$$)
                 if (defined($currentVehiclestatus->{remoteStart}->{remoteStartDuration}));
               readingsBulkUpdate($hash, "Remote_Start_Duration", "$currentVehiclestatus->{remoteStart}->{remoteStartTime}")
                 if (defined($currentVehiclestatus->{remoteStart}->{remoteStartTime}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Remote_Start" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{remoteStart}->{timestamp}))
+                  if(defined($currentVehiclestatus->{remoteStart}->{timestamp}));
+              }
             }
 
             #if("$hash->{Capability_TirePressureMonitoring}" eq "True")
@@ -1715,6 +1822,12 @@ sub FordpassVehicle_GetStatusV4($;$$)
                 if (defined($currentVehiclestatus->{fuel}->{fuelLevel}));
               readingsBulkUpdate($hash, "Fuel_DistanceToEmpty", "$currentVehiclestatus->{fuel}->{distanceToEmpty}")
                 if (defined($currentVehiclestatus->{fuel}->{distanceToEmpty}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Fuel" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{fuel}->{timestamp}))
+                  if(defined($currentVehiclestatus->{fuel}->{timestamp}));
+              }
             }
 
             if("$hash->{Capability_TirePressureMonitoring}" eq "True")
@@ -1722,19 +1835,50 @@ sub FordpassVehicle_GetStatusV4($;$$)
               readingsBulkUpdate($hash, "Tire_Status", "$currentVehiclestatus->{tirePressure}->{value}")
                 if (defined($currentVehiclestatus->{tirePressure}->{value}));
 
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Tire_Status" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{tirePressure}->{timestamp}))
+                  if(defined($currentVehiclestatus->{tirePressure}->{timestamp}));
+              }
+
               readingsBulkUpdate($hash, "Tire_Status_System", "$currentVehiclestatus->{TPMS}->{tirePressureSystemStatus}->{value}")
                 if (defined($currentVehiclestatus->{TPMS}->{tirePressureSystemStatus}->{value}));
 
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Tire_Status_System" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{tirePressureSystemStatus}->{timestamp}))
+                  if(defined($currentVehiclestatus->{TPMS}->{tirePressureSystemStatus}->{timestamp}));
+              }
+
               readingsBulkUpdate($hash, "Tire_Front_Pressure_Recommended", $currentVehiclestatus->{TPMS}->{recommendedFrontTirePressure}->{value} / 10)
                 if (defined($currentVehiclestatus->{TPMS}->{recommendedFrontTirePressure}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Tire_Front_Pressure_Recommended" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{recommendedFrontTirePressure}->{timestamp}))
+                  if(defined($currentVehiclestatus->{TPMS}->{recommendedFrontTirePressure}->{timestamp}));
+              }
+
               readingsBulkUpdate($hash, "Tire_Rear_Pressure_Recommended", $currentVehiclestatus->{TPMS}->{recommendedRearTirePressure}->{value} / 10)
                 if (defined($currentVehiclestatus->{TPMS}->{recommendedRearTirePressure}->{value}));
+
+              if ($hash->{helper}{ShowTimestamps} eq "1")
+              {
+                readingsBulkUpdate($hash, "Tire_Rear_Pressure_Recommended" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{recommendedRearTirePressure}->{timestamp}))
+                  if(defined($currentVehiclestatus->{TPMS}->{recommendedRearTirePressure}->{timestamp}));
+              }
     
               if (defined($currentVehiclestatus->{TPMS}->{leftFrontTireStatus}->{value}) and
                 $currentVehiclestatus->{TPMS}->{leftFrontTireStatus}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Tire_Front_Left_Status", "$currentVehiclestatus->{TPMS}->{leftFrontTireStatus}->{value}");
                 readingsBulkUpdate($hash, "Tire_Front_Left_Pressure", $currentVehiclestatus->{TPMS}->{leftFrontTirePressure}->{value} / 100);
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Tire_Front_Left" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{leftFrontTireStatus}->{timestamp}))
+                    if(defined($currentVehiclestatus->{TPMS}->{leftFrontTireStatus}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{rightFrontTireStatus}->{value}) and
@@ -1742,6 +1886,12 @@ sub FordpassVehicle_GetStatusV4($;$$)
               {
                 readingsBulkUpdate($hash, "Tire_Front_Right_Status", "$currentVehiclestatus->{TPMS}->{rightFrontTireStatus}->{value}");
                 readingsBulkUpdate($hash, "Tire_Front_Right_Pressure", $currentVehiclestatus->{TPMS}->{rightFrontTirePressure}->{value} / 100);
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Tire_Front_Right" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{rightFrontTirePressure}->{timestamp}))
+                    if(defined($currentVehiclestatus->{TPMS}->{rightFrontTirePressure}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{outerLeftRearTireStatus}->{value}) and
@@ -1749,6 +1899,12 @@ sub FordpassVehicle_GetStatusV4($;$$)
               {
                 readingsBulkUpdate($hash, "Tire_Rear_Left_Status", "$currentVehiclestatus->{TPMS}->{outerLeftRearTireStatus}->{value}");
                 readingsBulkUpdate($hash, "Tire_Rear_Left_Pressure", $currentVehiclestatus->{TPMS}->{outerLeftRearTirePressure}->{value} / 100);
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Tire_Rear_Left" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{outerLeftRearTirePressure}->{timestamp}))
+                    if(defined($currentVehiclestatus->{TPMS}->{outerLeftRearTirePressure}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{outerRightRearTireStatus}->{value}) and
@@ -1756,6 +1912,12 @@ sub FordpassVehicle_GetStatusV4($;$$)
               {
                 readingsBulkUpdate($hash, "Tire_Rear_Right_Status", "$currentVehiclestatus->{TPMS}->{outerRightRearTireStatus}->{value}");
                 readingsBulkUpdate($hash, "Tire_Rear_Right_Pressure", $currentVehiclestatus->{TPMS}->{outerRightRearTirePressure}->{value} / 100);
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Tire_Rear_Right" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{outerRightRearTirePressure}->{timestamp}))
+                    if(defined($currentVehiclestatus->{TPMS}->{outerRightRearTirePressure}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{innerLeftRearTireStatus}->{value}) and
@@ -1763,6 +1925,12 @@ sub FordpassVehicle_GetStatusV4($;$$)
               {
                 readingsBulkUpdate($hash, "Tire_Rear_InnerLeft_Status", "$currentVehiclestatus->{TPMS}->{innerLeftRearTireStatus}->{value}");
                 readingsBulkUpdate($hash, "Tire_Rear_InnerLeft_Pressure", $currentVehiclestatus->{TPMS}->{innerLeftRearTirePressure}->{value} / 100);
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Tire_Rear_InnerLeft" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{innerLeftRearTirePressure}->{timestamp}))
+                    if(defined($currentVehiclestatus->{TPMS}->{innerLeftRearTirePressure}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{TPMS}->{innerRightRearTireStatus}->{value}) and
@@ -1770,6 +1938,12 @@ sub FordpassVehicle_GetStatusV4($;$$)
               {
                 readingsBulkUpdate($hash, "Tire_Rear_InnerRight_Status", "$currentVehiclestatus->{TPMS}->{innerRightRearTireStatus}->{value}");
                 readingsBulkUpdate($hash, "Tire_Rear_InnerRight_Pressure", $currentVehiclestatus->{TPMS}->{innerRightRearTirePressure}->{value} / 100);
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Tire_Rear_InnerRight" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{TPMS}->{innerRightRearTirePressure}->{timestamp}))
+                    if(defined($currentVehiclestatus->{TPMS}->{innerRightRearTirePressure}->{timestamp}));
+                }
               }
             }
 
@@ -1779,24 +1953,48 @@ sub FordpassVehicle_GetStatusV4($;$$)
                 $currentVehiclestatus->{windowPosition}->{driverWindowPosition}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Window_Front_Driver_Position", "$currentVehiclestatus->{windowPosition}->{driverWindowPosition}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Window_Front_Driver_Position" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{windowPosition}->{driverWindowPosition}->{timestamp}))
+                    if(defined($currentVehiclestatus->{windowPosition}->{driverWindowPosition}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{windowPosition}->{passWindowPosition}->{value}) and
                 $currentVehiclestatus->{windowPosition}->{passWindowPosition}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Window_Front_Passenger_Position", "$currentVehiclestatus->{windowPosition}->{passWindowPosition}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Window_Front_Passenger_Position" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{windowPosition}->{passWindowPosition}->{timestamp}))
+                    if(defined($currentVehiclestatus->{windowPosition}->{passWindowPosition}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{windowPosition}->{rearDriverWindowPos}->{value}) and
                 $currentVehiclestatus->{windowPosition}->{rearDriverWindowPos}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Window_Rear_Driver_Position", "$currentVehiclestatus->{windowPosition}->{rearDriverWindowPos}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Window_Rear_Driver_Position" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{windowPosition}->{rearDriverWindowPos}->{timestamp}))
+                    if(defined($currentVehiclestatus->{windowPosition}->{rearDriverWindowPos}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{windowPosition}->{rearPassWindowPos}->{value}) and
                 $currentVehiclestatus->{windowPosition}->{rearPassWindowPos}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Window_Rear_Passenger_Position", "$currentVehiclestatus->{windowPosition}->{rearPassWindowPos}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Window_Rear_Passenger_Position" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{windowPosition}->{rearPassWindowPos}->{timestamp}))
+                    if(defined($currentVehiclestatus->{windowPosition}->{rearPassWindowPos}->{timestamp}));
+                }
               }
             }
 
@@ -1806,42 +2004,84 @@ sub FordpassVehicle_GetStatusV4($;$$)
                 $currentVehiclestatus->{doorStatus}->{driverDoor}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Door_Front_Driver", "$currentVehiclestatus->{doorStatus}->{driverDoor}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Door_Front_Driver" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{doorStatus}->{driverDoor}->{timestamp}))
+                    if(defined($currentVehiclestatus->{doorStatus}->{driverDoor}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{doorStatus}->{passengerDoor}->{value}) and
                 $currentVehiclestatus->{doorStatus}->{passengerDoor}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Door_Front_Passenger", "$currentVehiclestatus->{doorStatus}->{passengerDoor}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Door_Front_Passenger" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{doorStatus}->{passengerDoor}->{timestamp}))
+                    if(defined($currentVehiclestatus->{doorStatus}->{passengerDoor}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{doorStatus}->{leftRearDoor}->{value}) and
                 $currentVehiclestatus->{doorStatus}->{leftRearDoor}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Door_Rear_Left", "$currentVehiclestatus->{doorStatus}->{leftRearDoor}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Door_Rear_Left" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{doorStatus}->{leftRearDoor}->{timestamp}))
+                    if(defined($currentVehiclestatus->{doorStatus}->{leftRearDoor}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{doorStatus}->{rightRearDoor}->{value}) and
                 $currentVehiclestatus->{doorStatus}->{rightRearDoor}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Door_Rear_Right", "$currentVehiclestatus->{doorStatus}->{rightRearDoor}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Door_Rear_Right" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{doorStatus}->{rightRearDoor}->{timestamp}))
+                    if(defined($currentVehiclestatus->{doorStatus}->{rightRearDoor}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{doorStatus}->{hoodDoor}->{value}) and
                 $currentVehiclestatus->{doorStatus}->{hoodDoor}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Door_Hood", "$currentVehiclestatus->{doorStatus}->{hoodDoor}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Door_Hood" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{doorStatus}->{hoodDoor}->{timestamp}))
+                    if(defined($currentVehiclestatus->{doorStatus}->{hoodDoor}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{doorStatus}->{tailgateDoor}->{value}) and
                 $currentVehiclestatus->{doorStatus}->{tailgateDoor}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Door_Tailgate", "$currentVehiclestatus->{doorStatus}->{tailgateDoor}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Door_Tailgate" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{doorStatus}->{tailgateDoor}->{timestamp}))
+                    if(defined($currentVehiclestatus->{doorStatus}->{tailgateDoor}->{timestamp}));
+                }
               }
 
               if (defined($currentVehiclestatus->{doorStatus}->{innerTailgateDoor}->{value}) and
                 $currentVehiclestatus->{doorStatus}->{innerTailgateDoor}->{value} ne "Not_Supported")
               {
                 readingsBulkUpdate($hash, "Door_Tailgate_Inner", "$currentVehiclestatus->{doorStatus}->{innerTailgateDoor}->{value}");
+
+                if ($hash->{helper}{ShowTimestamps} eq "1")
+                {
+                  readingsBulkUpdate($hash, "Door_Tailgate_Inner" . $TimestampMarker, FordpassVehicle_GetLTZFromUTC($currentVehiclestatus->{doorStatus}->{innerTailgateDoor}->{timestamp}))
+                    if(defined($currentVehiclestatus->{doorStatus}->{innerTailgateDoor}->{timestamp}));
+                }
               }
             }
           }
@@ -2690,6 +2930,34 @@ sub FordpassVehicle_StoreRename($$$$)
   # delete old key
   setKeyValue($old_deviceKey, undef);
 }
+
+##################################
+# FordpassVehicle_GetLTZFromUTC($)
+sub FordpassVehicle_GetLTZFromUTC($)
+{
+  my ( $timestampUTCString ) = @_;
+
+  if(defined($timestampUTCString) and
+    $timestampUTCString ne "")
+  {
+    # 03-07-2022 05:02:02 Format ist Month-Day-Year
+    my ($datehour, $rest) = split(/:/,$timestampUTCString,2);
+    my ($month, $day, $year, $hour) = $datehour =~ /(\d\d)-(\d\d)-(\d+)\s+(\d\d)/;
+    
+    #  proto: $time = timegm($sec, $min, $hour, $mday, $mon, $year);
+    my $epoch = timegm(0, 0, $hour, $day, $month-1, $year);
+    
+    #  proto: ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = localtime(time);
+    my ($lyear, $lmonth, $lday, $lhour, $isdst) =  (localtime($epoch))[5,4,3,2,-1];
+
+    return sprintf("%04d-%02d-%02d %02d:%s", $lyear + 1900, $lmonth + 1, $lday, $lhour, $rest);
+  }
+  else
+  {
+    return undef;
+  }
+}
+
 
 ##################################
 # FordpassVehicle_GetHTMLLocation($name)
