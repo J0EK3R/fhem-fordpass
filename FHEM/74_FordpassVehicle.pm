@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.8";
+my $VERSION = "0.0.9";
 
 use strict;
 use warnings;
@@ -91,10 +91,11 @@ sub FordpassVehicle_GetHTMLLocation($);
 
 my $GetLoopDataInterval                = 1;     # interval of the data-get-timer
 
-my $Vehicle_DefaultInterval            = 60 * 1; # default value for the polling interval in seconds
+my $Vehicle_DefaultIntervalSlow        = 60 * 1; # default value for the slow polling interval in seconds
+my $Vehicle_DefaultIntervalFast        = 30 * 1; # default value for the fast polling interval in seconds
+
 my $Vehicle_DefaultStateFormat         = ""; # State: state<br/>Valve: CmdValveState<br/>Consumption: TodayWaterConsumption l<br/>Temperature: LastTemperature Grad C<br/>Pressure: LastPressure bar";
 my $Vehicle_DefaultWebCmdFormat        = "update";
-my $Vehicle_DefaultGetTimespan         = 60 * 60 * 24 * 1; # 1 days
 
 my $API_URL     = 'https://usapi.cv.ford.com/api';  # US Connected Vehicle api
 my $VEHICLE_URL = 'https://services.cx.ford.com/api';
@@ -114,7 +115,8 @@ my $FordpassVehicle_AttrList =
     "debug:0,1 " . 
     "debugJSON:0,1 " . 
     "disable:0,1 " . 
-    "interval " .
+    "intervalslow " .
+    "intervalfast " .
     "refreshSatusMode:ignitionOn,never,always " .
     "showTimestamps:0,1 " .
     "genericReadings:none,valid,full " . 
@@ -189,8 +191,8 @@ sub FordpassVehicle_Define($$)
   }
 
   # the SenseGuard devices update every 15 minutes
-  $hash->{".DEFAULTINTERVAL"}     = $Vehicle_DefaultInterval;
-  $hash->{".DEFAULTGETTIMESPAN"}  = $Vehicle_DefaultGetTimespan;
+  $hash->{".DEFAULTINTERVALSLOW"} = $Vehicle_DefaultIntervalSlow;
+  $hash->{".DEFAULTINTERVALFAST"} = $Vehicle_DefaultIntervalFast;
   $hash->{".AttrList"} =
     $FordpassVehicle_AttrList . 
     $readingFnAttributes;
@@ -219,7 +221,8 @@ sub FordpassVehicle_Define($$)
   $hash->{VERSION}                    = $VERSION;
   $hash->{NOTIFYDEV}                  = "global,$name,$bridge";
   $hash->{RETRIES}                    = 3;
-  $hash->{DataTimerInterval}          = $hash->{".DEFAULTINTERVAL"};
+  $hash->{DataTimerIntervalSlow}      = $hash->{".DEFAULTINTERVALSLOW"};
+  $hash->{DataTimerIntervalFast}      = $hash->{".DEFAULTINTERVALFAST"};
   $hash->{helper}{DEBUG}              = "0";
   $hash->{helper}{IsDisabled}         = "0";
   $hash->{helper}{GenericReadings}    = "none";
@@ -262,7 +265,7 @@ sub FordpassVehicle_Define($$)
   # ensure attribute inerval is present
   if(AttrVal($name, "interval", "none") eq "none")
   {
-    CommandAttr(undef, $name . " interval " . $hash->{DataTimerInterval})
+    CommandAttr(undef, $name . " interval " . $hash->{DataTimerIntervalSlow})
   }
 
   Log3($name, 3, "FordpassVehicle_Define($name) - defined FordpassVehicle with DEVICEID: $vehicleId");
@@ -418,22 +421,47 @@ sub FordpassVehicle_Attr(@)
     FordpassVehicle_UpdateInternals($hash);
   }
 
-  # Attribute "interval"
-  elsif($attrName eq "interval")
+  # Attribute "intervalslow"
+  elsif($attrName eq "intervalslow")
   {
-    # onchange event for attribute "interval" is handled in sub "Notify" -> calls "updateValues" -> Timer is reloaded
+    # onchange event for attribute "intervalslow" is handled in sub "Notify" -> calls "updateValues" -> Timer is reloaded
     if($cmd eq "set")
     {
       return "Interval must be greater than 0"
         unless($attrVal > 0);
 
-      $hash->{DataTimerInterval} = $attrVal;
+      $hash->{DataTimerIntervalSlow} = $attrVal;
 
       Log3($name, 3, "FordpassVehicle_Attr($name) - set interval: $attrVal");
     } 
     elsif($cmd eq "del")
     {
-      $hash->{DataTimerInterval} = $hash->{".DEFAULTINTERVAL"};
+      $hash->{DataTimerIntervalSlow} = $hash->{".DEFAULTINTERVALSLOW"};
+
+      Log3($name, 3, "FordpassVehicle_Attr($name) - delete interval and set default: 60");
+    }
+
+    FordpassVehicle_TimerExecute($hash)
+      if($init_done and
+        not $hash->{helper}{DefineRunning});
+  }
+
+  # Attribute "intervalfast"
+  elsif($attrName eq "intervalfast")
+  {
+    # onchange event for attribute "intervalfast" is handled in sub "Notify" -> calls "updateValues" -> Timer is reloaded
+    if($cmd eq "set")
+    {
+      return "Interval must be greater than 0"
+        unless($attrVal > 0);
+
+      $hash->{DataTimerIntervalFast} = $attrVal;
+
+      Log3($name, 3, "FordpassVehicle_Attr($name) - set interval: $attrVal");
+    } 
+    elsif($cmd eq "del")
+    {
+      $hash->{DataTimerIntervalFast} = $hash->{".DEFAULTINTERVALFAST"};
 
       Log3($name, 3, "FordpassVehicle_Attr($name) - delete interval and set default: 60");
     }
@@ -723,7 +751,6 @@ sub FordpassVehicle_TimerExecute($)
 {
   my ( $hash )  = @_;
   my $name      = $hash->{NAME};
-  my $interval  = $hash->{DataTimerInterval};
 
   FordpassVehicle_TimerRemove($hash);
 
@@ -734,6 +761,11 @@ sub FordpassVehicle_TimerExecute($)
 
     FordpassVehicle_Update($hash);
 
+    # if ignition ist "on" then wait "fast" interval for next call else "slow"
+    my $interval = $hash->{helper}{IgnitionStatus} eq "1" ?
+      $hash->{DataTimerIntervalFast} : 
+      $hash->{DataTimerIntervalSlow};
+  
     # reload timer
     my $nextTimer = gettimeofday() + $interval;
     $hash->{DataTimerNext} = strftime($TimeStampFormat, localtime($nextTimer));
