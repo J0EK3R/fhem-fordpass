@@ -1,12 +1,12 @@
 ###############################################################################
 #
-# Developed with eclipse
+# Developed with eclipse on windows os using fiddler to catch ip communication.
 #
 #  (c) 2019 Copyright: J.K. (J0EK3R at gmx dot net)
 #  All rights reserved
 #
-#   Special thanks goes to committers:
-#
+#  Special thanks goes to committers:
+#  * me
 #
 #  This script is free software; you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.10";
+my $VERSION = "0.0.11";
 
 use strict;
 use warnings;
@@ -110,7 +110,7 @@ my %regions =
   "AU"  => "5C80A6BB-CF0D-4A30-BDBF-FC804B5C1A98",
 );
 
-my $TimeStampFormat = "%Y-%m-%dT%I:%M:%S";
+my $TimeStampFormat = "%Y-%m-%dT%H:%M:%S";
 
 my $ReloginOffset_s = -60;                             # (negative) timespan in seconds to add "expires_in" timespan to relogin
 
