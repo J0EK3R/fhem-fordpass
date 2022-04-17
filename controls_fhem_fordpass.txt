@@ -1,2 +1,2 @@
-UPD 2022-03-19_05:56:34 71662   FHEM/73_FordpassAccount.pm
-UPD 2022-03-19_05:56:34 125036  FHEM/74_FordpassVehicle.pm
+UPD 2022-04-17_03:52:20 71722   FHEM/73_FordpassAccount.pm
+UPD 2022-04-17_03:52:20 125096  FHEM/74_FordpassVehicle.pm
