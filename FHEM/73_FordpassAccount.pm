@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.11";
+my $VERSION = "1.0.0";
 
 use strict;
 use warnings;
@@ -47,6 +47,7 @@ eval {use JSON;1 or $missingModul .= "JSON "};
 # Forward declaration
 sub FordpassAccount_Initialize($);
 sub FordpassAccount_Define($$);
+sub FordpassAccount_Ready($);
 sub FordpassAccount_Undef($$);
 sub FordpassAccount_Delete($$);
 sub FordpassAccount_Rename(@);
@@ -85,22 +86,22 @@ sub FordpassAccount_StorePassword($$);
 sub FordpassAccount_ReadPassword($);
 sub FordpassAccount_DeletePassword($);
 
-my $DefaultRetries      = 3;                              # default number of retries
-my $DefaultInterval     = 60;                             # default value for the polling interval in seconds
-my $DefaultTimeout      = 5;                              # default value for response timeout in seconds
+my $DefaultRetries            = 3;                              # default number of retries
+my $DefaultInterval           = 60;                             # default value for the polling interval in seconds
+my $DefaultTimeout            = 5;                              # default value for response timeout in seconds
 
-my $DefaultSeperator    = "_";
-my $DebugMarker         = "Dbg";
+my $DefaultSeperator          = "_";
+my $DebugMarker               = "Dbg";
 
 my $DefaultRegion             = "EU";
 my $DefaultHeaderCountryCode  = "DEU";
 my $DefaultHeaderUserAgent    = "FordPass/5 CFNetwork/1240.0.4 Darwin/20.6.0";
 my $DefaultHeaderLocale       = "DE-DE";
 
-my $API_URL     = 'https://usapi.cv.ford.com/api';  # US Connected Vehicle api
-my $VEHICLE_URL = 'https://services.cx.ford.com/api';
-my $USER_URL    = 'https://api.mps.ford.com/api';
-my $TOKEN_URL   = 'https://sso.ci.ford.com/oidc/endpoint/default/token';
+my $API_URL                   = 'https://usapi.cv.ford.com/api';  # US Connected Vehicle api
+my $VEHICLE_URL               = 'https://services.cx.ford.com/api';
+my $USER_URL                  = 'https://api.mps.ford.com/api';
+my $TOKEN_URL                 = 'https://sso.ci.ford.com/oidc/endpoint/default/token';
 
 my %regions = 
 (
@@ -210,6 +211,18 @@ sub FordpassAccount_Define($$)
   $modules{FordpassAccount}{defptr}{ACCOUNT} = $hash;
 
   return undef;
+}
+
+####################################
+# FordpassAccount_Ready( $hash )
+sub FordpassAccount_Ready($)
+{
+  my ($hash)  = @_;
+  my $name    = $hash->{NAME};
+
+  Log3($name, 4, "FordpassAccount_Ready($name)");
+
+  FordpassAccount_TimerExecute($hash);
 }
 
 #####################################
@@ -485,28 +498,26 @@ sub FordpassAccount_Notify($$)
       # this is the initial call after fhem has startet
       Log3($name, 3, "FordpassAccount_Notify($name) - INITIALIZED");
 
-      FordpassAccount_TimerExecute($hash);
+      FordpassAccount_Ready($hash);
     }
 
     elsif (grep(m/^REREADCFG$/, @{$events}))
     {
       Log3($name, 3, "FordpassAccount_Notify($name) - REREADCFG");
 
-      FordpassAccount_TimerExecute($hash);
+      FordpassAccount_Ready($hash);
     }
 
     elsif (grep(m/^DEFINED.$name$/, @{$events}) )
     {
       Log3($name, 3, "FordpassAccount_Notify($name) - DEFINED");
-
-      FordpassAccount_TimerExecute($hash);
     }
 
     elsif (grep(m/^MODIFIED.$name$/, @{$events}))
     {
       Log3($name, 3, "FordpassAccount_Notify($name) - MODIFIED");
 
-      FordpassAccount_TimerExecute($hash);
+      FordpassAccount_Ready($hash);
     }
 
     if ($init_done)
@@ -578,11 +589,6 @@ sub FordpassAccount_Set($@)
     fhem("deletereading $name $mask", 1);
     return;
   }
-  ### Command "debugGetDevicesState"
-  elsif ( lc $cmd eq lc "debugGetDevicesState" )
-  {
-    FordpassAccount_Update($hash);
-  }
   ### Command "debugLogin"
   elsif ( lc $cmd eq lc "debugLogin" )
   {
@@ -624,9 +630,6 @@ sub FordpassAccount_Set($@)
 
     $list .= "update:noArg "
       if($isPasswordSet);
-
-    $list .= "debugGetDevicesState:noArg "
-      if ( $isPasswordSet and $hash->{helper}{DEBUG} ne "0");
 
     $list .= "debugLogin:noArg "
       if ( $isPasswordSet and $hash->{helper}{DEBUG} ne "0");
@@ -1236,7 +1239,6 @@ sub FordpassAccount_Login_GetToken($;$$)
   FordpassAccount_RequestParam($hash, $param);
 }
 
-
 #####################################
 # FordpassAccount_Update( $hash, $callbackSuccess, $callbackFail )
 sub FordpassAccount_Update($;$$)
@@ -1552,7 +1554,7 @@ sub FordpassAccount_GetDashboard($;$$)
             $hash->{currentVehicle} = $currentVehicle;
             my $current_vehicleId = $currentVehicle->{"vehicleId"};
   
-            # dispatch to GroheOndusSmartDevice::Parse()
+            # dispatch to FordpassVehicle::Parse()
             my $found = Dispatch( $hash, "FORDPASSVEHICLE_" . $current_vehicleId, undef );
             
             # If a new device was created $found is undef.
@@ -1708,7 +1710,7 @@ sub FordpassAccount_RequestErrorHandling($$$)
   my $name  = $hash->{NAME};
   my $dhash = $hash;
 
-  $dhash = $modules{GroheOndusSmartDevice}{defptr}{ $param->{"device_id"} }
+  $dhash = $modules{FordpassVehicle}{defptr}{ $param->{"device_id"} }
     unless ( not defined( $param->{"device_id"} ) );
 
   my $dname = $dhash->{NAME};
@@ -2167,29 +2169,33 @@ sub FordpassAccount_DeletePassword($)
 
 =pod
 =item device
-=item summary module to communicate with the GroheOndusCloud
+=item summary module to communicate with the Ford-Cloud
 =begin html
 
   <a name="FordpassAccount"></a><h3>FordpassAccount</h3>
   <ul>
-    In combination with the FHEM module <a href="#GroheOndusSmartDevice">GroheOndusSmartDevice</a> this module communicates with the <b>Grohe-Cloud</b>.<br>
+    In combination with the FHEM module <a href="#FordpassVehicle">FordpassVehicle</a> this module communicates with the <b>Ford-Cloud</b>.<br>
     <br>
-    You can get the configurations and measured values of the registered <b>Sense</b> und <b>SenseGuard</b> appliances 
-    and i.E. open/close the valve of a <b>SenseGuard</b> appliance.<br>
+    You can get some states and measured values of your registered <b>vehicles</b> like 
+    odometer, ignition state, door and window states, tire pressures, battery level, oil state, fuel level and distance to empty and location. 
+    And you can set some commands i.E. lock/unlock the doors or start/stop the engine (if supported).<br>
     <br>
-    Once the <b>FordpassAccount</b> is created the connected devices are recognized and created automatically in FHEM.<br>
-    From now on the devices can be controlled and changes in the <b>GroheOndusAPP</b> are synchronized with the state and readings of the devices.
+    First you have to sign in to the Ford-Cloud i.E. with the <b>FordPass-App</b> and register your vehicles.
+    Once the <b>FordPass-Account</b> is created the registered vehicles are recognized and created automatically in FHEM.<br>
     <br>
     <br>
     <b>Notes</b>
     <ul>
-      <li>This module communicates with the <b>Grohe-Cloud</b> - you have to be registered.
+      <li>This module communicates with the <b>Ford-Cloud</b> - you have to be registered.
       </li>
-      <li>Register your account directly at grohe - don't use "Sign in with Apple/Google/Facebook" or something else.
+      <li>If you want to get the gps location of your vehicle you have to permit location access in the app.
       </li>
       <li>There is a <b>debug-mode</b> you can enable/disable with the <b>attribute debug</b> to see more internals.
       </li>
     </ul>
+    <br>
+    This FHEM module is hosted in my <a href="https://github.com/J0EK3R/fhem-fordpass">github repository</a>.
+    <br>
     <br>
     <a name="FordpassAccount"></a><b>Define</b>
     <ul>
@@ -2198,14 +2204,14 @@ sub FordpassAccount_DeletePassword($)
       Example:<br>
       <ul>
         <code>
-        define Fordpass.Account FordpassAccount<br>
+        define myFordpassAccount FordpassAccount<br>
         <br>
         </code>
       </ul>
     </ul><br>
     <a name="FordpassAccount"></a><b>Set</b>
     <ul>
-      <li><a name="FordpassAccountgroheOndusAccountPassword">groheOndusAccountPassword</a><br>
+      <li><a name="FordpassAccountfordpassPassword">fordpassPassword</a><br>
         Set the password and store it.
       </li>
       <br>
@@ -2214,28 +2220,23 @@ sub FordpassAccount_DeletePassword($)
       </li>
       <br>
       <li><a name="FordpassAccountupdate">update</a><br>
-        Login if needed and update all locations, rooms and appliances.
+        Update dashboard.
       </li>
       <br>
       <li><a name="FordpassAccountclearreadings">clearreadings</a><br>
-        Clear all readings of the module.
+        Clear all/debug readings of the module.
       </li>
       <br>
       <b><i>Debug-mode</i></b><br>
       <br>
-      <li><a name="FordpassAccountdebugGetDevicesState">debugGetDevicesState</a><br>
-        If debug-mode is enabled:<br>
-        get locations, rooms and appliances.
-      </li>
-      <br>
       <li><a name="FordpassAccountdebugLogin">debugLogin</a><br>
         If debug-mode is enabled:<br>
-        login.
+        Force login.
       </li>
       <br>
       <li><a name="FordpassAccountdebugSetLoginState">debugSetLoginState</a><br>
         If debug-mode is enabled:<br>
-        set/reset internal statemachine to/from state "login" - if set all actions will be locked!.
+        set/reset internal state machine to/from state "login" - if set all actions will be locked!.
       </li>
       <br>
       <li><a name="FordpassAccountdebugSetTokenExpired">debugSetTokenExpired</a><br>
@@ -2246,23 +2247,38 @@ sub FordpassAccount_DeletePassword($)
     <br>
     <a name="FordpassAccountattr"></a><b>Attributes</b><br>
     <ul>
-      <li><a name="FordpassAccountusername">username</a><br>
-        Your registered Email-address to login to the grohe clound.
+      <li><a name="FordpassAccountfordpassUser">fordpassUser</a><br>
+        Your registered Email-address to login to the Ford-Cloud.
       </li>
       <br>
       <li><a name="FordpassAccountautocreatedevices">autocreatedevices</a><br>
-        If <b>enabled</b> (default) then GroheOndusSmartDevices will be created automatically.<br>
-        If <b>disabled</b> then GroheOndusSmartDevices must be create manually.<br>
+        If <b>enabled</b> (default) then vehicles will be created automatically.<br>
+        If <b>disabled</b> then FordpassVehicles must be create manually.<br>
       </li>
       <br>
       <li><a name="FordpassAccountinterval">interval</a><br>
-        Interval in seconds to poll for locations, rooms and appliances.
+        Interval in seconds to poll the dashboard.
         The default value is 60 seconds.
       </li>
       <br>
-      <li><a name="FordpassAccountdisable">disable</a><br>
-        If <b>0</b> (default) then FordpassAccount is <b>enabled</b>.<br>
-        If <b>1</b> then FordpassAccount is <b>disabled</b> - no communication to the grohe cloud will be done.<br>
+      <li><a name="FordpassAccountcountrycode">countrycode</a><br>
+        CountryCode wich is sent to the Ford-Cloud.<br>
+        Default is <b>DEU</b>.
+      </li>
+      <br>
+      <li><a name="FordpassAccountregion">region</a><br>
+        Region wich is sent to the Ford-Cloud.<br>
+        <ul>
+          <li>
+          <b>EU</b> - (default) Europe
+          </li>
+          <li>
+          <b>US</b> - United States
+          </li>
+          <li>
+          <b>CA</b> - Canada
+          </li>
+        </ul>
       </li>
       <br>
       <li><a name="FordpassAccountdebug">debug</a><br>
@@ -2274,27 +2290,22 @@ sub FordpassAccount_DeletePassword($)
         If <b>0</b> (default)<br>
         If <b>1</b> if communication fails the json-payload of incoming telegrams is set to a reading.<br>
       </li>
-    </ul><br>
-    <a name="FordpassAccountreadings"></a><b>Readings</b>
-    <ul>
-      <li><a>count_appliance</a><br>
-        Count of appliances.<br>
+      <br>
+      <li><a name="FordpassAccountgenericReadings">genericReadings</a><br>
+        Control wich readings are shown.
+        <ul>
+          <li>
+          <b>none</b> - (default) some certain values are mapped to a reading 
+          </li>
+          <li>
+          <b>valid</b> - all valid json entries are mapped to a reading
+          </li>
+          <li>
+          <b>full</b> - all json entries are mapped to a reading
+          </li>
+        </ul>
       </li>
       <br>
-      <li><a>count_locations</a><br>
-        Count of locations.<br>
-      </li>
-      <br>
-      <li><a>count_rooms</a><br>
-        Count of rooms.<br>
-      </li>
-    </ul><br>
-    <a name="FordpassAccountinternals"></a><b>Internals</b>
-    <ul>
-      <li><a>DEBUG_IsDisabled</a><br>
-        If <b>1</b> (default)<br>
-        If <b>0</b> debugging mode is enabled - more internals and commands are shown.<br>
-      </li>
     </ul><br>
     <br>
   </ul>
@@ -2302,16 +2313,17 @@ sub FordpassAccount_DeletePassword($)
 
 =for :application/json;q=META.json 73_FordpassAccount.pm
 {
-  "abstract": "Modul to communicate with the GroheCloud",
+  "abstract": "Modul to communicate with the Ford-Cloud",
   "x_lang": {
     "de": {
-      "abstract": "Modul zur Datenübertragung zur GroheCloud"
+      "abstract": "Modul zur Datenübertragung zur Ford-Cloud"
     }
   },
   "keywords": [
     "fhem-mod-device",
     "fhem-core",
-    "Grohe",
+    "Ford",
+    "Fordpass",
     "Smart"
   ],
   "release_status": "stable",

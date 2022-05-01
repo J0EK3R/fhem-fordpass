@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "0.0.11";
+my $VERSION = "1.0.0";
 
 use strict;
 use warnings;
@@ -47,6 +47,7 @@ eval {use JSON;1 or $missingModul .= "JSON "};
 # Forward declaration
 sub FordpassVehicle_Initialize($);
 sub FordpassVehicle_Define($$);
+sub FordpassVehicle_Ready($);
 sub FordpassVehicle_Undef($$);
 sub FordpassVehicle_Delete($$);
 sub FordpassVehicle_Rename($$);
@@ -83,8 +84,6 @@ sub FordpassVehicle_Restore($$$$);
 sub FordpassVehicle_StoreRename($$$$);
 
 sub FordpassVehicle_GetLTZFromUTC($);
-
-sub FordpassVehicle_GetHTMLLocation($);
 
 #########################
 # Constants
@@ -278,6 +277,18 @@ sub FordpassVehicle_Define($$)
   $hash->{helper}{DefineRunning} = undef;
 
   return undef;
+}
+
+####################################
+# FordpassVehicle_Ready( $hash )
+sub FordpassVehicle_Ready($)
+{
+  my ($hash)  = @_;
+  my $name    = $hash->{NAME};
+
+  Log3($name, 4, "FordpassVehicle_Ready($name)");
+
+  FordpassVehicle_Upgrade($hash);
 }
 
 #####################################
@@ -515,12 +526,33 @@ sub FordpassVehicle_Notify($$)
   # process "global" events
   if($devtype eq "Global")
   {
-    # global Initialization is done
-    if(grep(m/^INITIALIZED|REREADCFG$/, @{$events}))
+    if (grep(m/^INITIALIZED$/, @{$events}))
     {
-      Log3($name, 3, "FordpassVehicle_Notify($name) - global event INITIALIZED was catched");
+      # this is the initial call after fhem has startet
+      Log3($name, 3, "FordpassVehicle_Notify($name) - INITIALIZED");
 
-      FordpassVehicle_Upgrade($hash);
+      FordpassVehicle_Ready($hash);
+    }
+
+    elsif (grep(m/^REREADCFG$/, @{$events}))
+    {
+      Log3($name, 3, "FordpassVehicle_Notify($name) - REREADCFG");
+
+      FordpassVehicle_Ready($hash);
+    }
+
+    elsif (grep(m/^DEFINED.$name$/, @{$events}) )
+    {
+      Log3($name, 3, "FordpassVehicle_Notify($name) - DEFINED");
+    }
+
+    elsif (grep(m/^MODIFIED.$name$/, @{$events}))
+    {
+      Log3($name, 3, "FordpassVehicle_Notify($name) - MODIFIED");
+    }
+
+    if ($init_done)
+    {
     }
   }
   
@@ -2990,74 +3022,31 @@ sub FordpassVehicle_GetLTZFromUTC($)
   }
 }
 
-
-##################################
-# FordpassVehicle_GetHTMLLocation($name)
-sub FordpassVehicle_GetHTMLLocation($)
-{
-#  <iframe width="700" height="500" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" src="http://m.osmtools.de/?lon=9&lat=49&zoom=6&mlon=10.527099609314&mlat=48.674597772512&icon=4&iframe=1" ></iframe>
-  my ($name) = @_;
-
- my $longitude = ReadingsVal($name, "Location_Longitude", "0");
- my $latitude = ReadingsVal($name, "Location_Latitude", "0");
-
-  my $url = "http://m.osmtools.de/?" .
-   "zoom=15" . 
-   "&lon=" . $longitude . 
-   "&mlon=" . $longitude .
-   "&lat=" . $latitude . 
-   "&mlat=" . $latitude .
-   "&icon=4" .
-   "&iframe=1";
-
-#  my $script = "<script> " .
-#    "window.setInterval(\"reloadIFrame();\", 10000); " .
-#    "function reloadIFrame() { document.getElementById(\"Map\").src=\"" . $url . "\"; } " .
-#    "</script>";
-
-  my $script = "<script> window.setTimeout( function() { window.location.reload(); }, 30000)</script>";
-
-  return 
-    "<iframe " .
-    "id=\"Map\" " .
-    "name=\"Map\" " .
-    "width=\"700\" " .
-    "height=\"500\" " .
-    "frameborder=\"0\" " .
-    "scrolling=\"no\" " .
-    "marginheight=\"0\" " .
-    "marginwidth=\"0\" " .
-    "icon=\"1\" " .
-    "src=\"" . $url . "\" " .
-    "></iframe> " .
-    $script;
-}
-
-
 1;
 
 =pod
 
 =item device
-=item summary Module wich represents a Grohe appliance like Sense or SenseGuard
+=item summary Module wich represents a vehicle of the Ford-Cloud
 
 =begin html
 
 <a name="FordpassVehicle"></a>
 <h3>FordpassVehicle</h3>
 <ul>
-    In combination with FHEM module <a href="#FordpassAccount">FordpassAccount</a> this module represents a grohe appliance like <b>Sense</b> or <b>SenseGuard</b>.<br>
-    It communicates over <a href="#FordpassAccount">FordpassAccount</a> to the <b>Grohe-Cloud</b> to get the configuration and measured values of the appliance.<br>
+    In combination with FHEM module <a href="#FordpassAccount">FordpassAccount</a> this module represents a vehicle.<br>
+    It communicates over <a href="#FordpassAccount">FordpassAccount</a> to the <b>Ford-Cloud</b> to get some states and measured values like 
+    odometer, ignition state, door and window states, tire pressures, battery level, oil state, fuel level and distance to empty and location.<br> 
+    And you can set some commands i.E. lock/unlock the doors or start/stop the engine (if supported).<br>
     <br>
-    Once the Bridge device is created, the connected devices are recognized and created automatically as FordpassVehicles in FHEM.<br>
-    From now on the appliances can be controlled and the measured values are synchronized with the state and readings of the devices.<br>
+    Once the FordpassAccount device is created, the registered devices are recognized and created automatically as FordpassVehicles in FHEM.<br>
     <br>
     <br>
     <b>Notes</b>
     <ul>
-      <li>This module communicates with the <b>Grohe-Cloud</b> - you have to be registered.
+      <li>This module communicates with the <b>Ford-Cloud</b> - you have to be registered.
       </li>
-      <li>Register your account directly at grohe - don't use "Sign in with Apple/Google/Facebook" or something else.
+      <li>If you want to get the gps location of your vehicle you have to permit location access in the app.
       </li>
       <li>There is a <b>debug-mode</b> you can enable/disable with the <b>attribute debug</b> to see more internals.
       </li>
@@ -3065,42 +3054,16 @@ sub FordpassVehicle_GetHTMLLocation($)
     <br>
     <a name="FordpassVehicle"></a><b>Define</b>
     <ul>
-      <code><B>define &lt;name&gt; FordpassVehicle &lt;bridge&gt; &lt;deviceId&gt; &lt;model&gt;</B></code>
+      <code><B>define &lt;name&gt; FordpassVehicle &lt;FordpassAccount&gt; &lt;vehicleId&gt;</B></code>
       <br><br>
       Example:<br>
       <ul>
         <code>
-        define SenseGuard FordpassVehicle GroheBridge 00000000-1111-2222-3333-444444444444 sense_guard <br>
+        define myCar FordpassVehicle myFordAccound XYZ00ABCDEFGH01234<br>
         <br>
         </code>
       </ul>
     </ul><br>
-    <br>
-    <a name="FordpassVehicletimestampproblem"></a><b>The Timestamp-Problem</b><br>
-    <br>
-    The Grohe appliances <b>Sense</b> and <b>SenseGuard</b> send their data to the <b>Grohe-Cloud</b> on a specific period of time.<br>
-    <br>
-    <ul>
-      <li><b>SenseGuard</b> measures every withdrawal and sends the data in a period of <b>15 minutes</b> to the <b>Grohe-Cloud</b></li>
-      <li><b>Sense</b> measures once per hour and sends the data in a period of only <b>24 hours</b> to the <b>Grohe-Cloud</b></li>
-    </ul>
-    <br>
-    So, if this module gets new data from the <b>Grohe-Cloud</b> the timestamps of the measurements are lying in the past.<br>
-    <br>
-    <b>Problem:</b><br>
-    When setting the received new data to this module's readings, FHEM's logging-mechanism (<a href="#FileLog">FileLog</a>, <a href="#DbLog">DbLog</a>) will take the current <b>system time</b> - not the timestamps of the measurements - to store the readings' values.<br>
-    So plots can't be created the common way with because of the inconsistent timestamp-value-combinations in the logfiles.<br> 
-    <br>
-    To solve the timestamp-problem this module writes a timestamp-value-combination string to the additional <b>"Measurement"-readings</b> and a plot has to split that string again to get the plot-points.<br>
-    See Plot Example below.<br>
-    <br>
-    Another solution to solve this problem is to enable the <b>LogFile-Mode</b> by setting the attribute <b>logFileModeEnabled</b> to <b>"1"</b>.<br>
-    With enabled <b>LogFile-Mode</b> this module is writing new measurevalues additionally to an own logfile with consistent timestamp-value-combinations.<br>
-    Define the logfile-name with the attribute <b>logFileNamePattern</b>.<br>
-    You can access the logfile in your known way - i.E. from within a plot - by defining a <a href="#FileLog">FileLog</a> device in <b>readonly</b> mode or just set the command <b>logFileCreateFileLogDevice</b>.<br>
-    <br>
-    With enabled <b>LogFile-Mode</b> you have the possibility to fetch <b>all historic data from the cloud</b> and store it in the logfile(s) by setting the command <b>logFileGetHistoricData</b>.<br>
-    <br> 
     <br> 
     <a name="FordpassVehicle"></a><b>Set</b>
     <ul>
@@ -3113,193 +3076,60 @@ sub FordpassVehicle_GetHTMLLocation($)
       </li>
       <br>
       <li><a name="FordpassVehicleclearreadings">clearreadings</a><br>
-        Clear all readings of the module.<br>
+        Clear all/debug readings of the module.<br>
         <br>
         <code>
-          set &lt;name&gt; clearreadings
+          set &lt;name&gt; clearreadings Dbg.*
         </code>
       </li>
       <br>
-      <b><i>SenseGuard-only</i></b><br>
-      <br>
-      <li><a name="FordpassVehiclebuzzer">buzzer</a><br>
+      <li><a name="FordpassVehiclerefreshStatus">refreshStatus</a><br>
+        Refresh status.<br>
         <br>
         <code>
-          set &lt;name&gt; buzzer &lt;on&gt;|&lt;off&gt;
-        </code>
-        <br>
-        <br>
-        <b>on</b> buzzer is turned on.<br>
-        <b>off</b> buzzer is turned off.<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehiclevalve">valve</a><br>
-        <br>
-        <code>
-          set &lt;name&gt; valve &lt;on&gt;|&lt;off&gt;
-        </code>
-        <br>
-        <br>
-        <b>on</b> open valve.<br>
-        <b>off</b> close valve.<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehicleTotalWaterConsumption">TotalWaterConsumption</a><br>
-        Adjust the reading <b>TotalWaterConsumption</b> to the given value by setting the attribute <b>offsetTotalWaterConsumption</b>.<br>
-        <br>
-        <code>
-          set &lt;name&gt; TotalWaterConsumption 398086.3
+          set &lt;name&gt; refreshStatus
         </code>
       </li>
       <br>
-      <li><a name="FordpassVehicleTotalHotWaterShare">TotalHotWaterShare</a><br>
-        Adjust the reading <b>TotalHotWaterShare</b> to the given value by setting the attribute <b>offsetTotalHotWaterShare</b>.<br>
+      <li><a name="FordpassVehicledoor">door</a><br>
+        Lock/unlock doors if supported by vehicle.<br>
         <br>
         <code>
-          set &lt;name&gt; TotalHotWaterShare 398086.3
+          set &lt;name&gt; door lock
+        </code>
+        <br>
+        <code>
+          set &lt;name&gt; door unlock
         </code>
       </li>
       <br>
-      <li><a name="FordpassVehicleTotalWaterCost">TotalWaterCost</a><br>
-        Adjust the reading <b>TotalWaterCost</b> to the given value by setting the attribute <b>offsetTotalWaterCost</b>.<br>
+      <li><a name="FordpassVehicleengine">engine</a><br>
+        Start/stop engine if supported by vehicle.<br>
         <br>
         <code>
-          set &lt;name&gt; TotalWaterCost 580.05235
+          set &lt;name&gt; engine start
+        </code>
+        <br>
+        <code>
+          set &lt;name&gt; engine stop
         </code>
       </li>
       <br>
-      <li><a name="FordpassVehicleTotalEnergyCost">TotalEnergyCost</a><br>
-        Adjust the reading <b>TotalEnergyCost</b> to the given value by setting the attribute <b>offsetTotalEnergyCost</b>.<br>
-        <br>
-        <code>
-          set &lt;name&gt; TotalEnergyCost 580.05235
-        </code>
-      </li>
-      <br>
-      <b><i>LogFile-Mode</i></b><br>
-      <i>If logfile-Mode is enabled (attribute logFileEnabled) all data is additionally written to logfiles(s).</i><br>
-      <i>Hint: Set logfile-name pattern with attribute logFilePattern</i><br>
-      <br>
-      <li><a name="FordpassVehiclelogFileGetHistoricData">logFileGetHistoricData</a><br>
-        <br>
-        <code>
-          set &lt;name&gt; logFileGetHistoricData [&lt;startdate&gt;|&lt;stop&gt;]
-        </code>
-        <br>
-        <br>
-        If parameter <b>startdate</b> is set then start getting all historic data since <b>startdate</b>.<br>
-        <br>
-        Format is: <b>2021-11-20</b> or <b>2021-11-20T05:42:34</b><br>
-        <br>
-        Else start getting all historic data since the greater value of the reading <b>ApplianceInstallationDate</b> or the value of attribute <b>logFileGetDataStartDate</b> if set.<br>
-        <br>
-        If getting historic values is running then the command <b>stop</b> will break that.<br>
-        <br>
-        Consider setting attribute <b>logFileEnabled</b> to <b>1</b> before start getting historic values to save the values in data-logfiles.<br> 
-        <br>
-        <i>Hint: you can create a matching <b>readonly</b>-mode <b>FileLog</b> device by setting command <b>logFileCreateFileLogDevice</b>.</i><br>
-        <br>
-        <b>Attention:<br>
-        All former data-logfiles will be cleared and filled with the new values!</b><br>
-        <br>
-        <b>Attention:<br>
-        Depending on the start date this may produce a lot of data and last very long!</b><br>
-        <br>
-        <br>
-        Because of the huge amount of data a SenseGuard device fetches the measurements and withdrawals of only one day per telegram.<br>
-        A Sense device fetches the data of 30 days per telegram.
-        <br>
-      </li>
-      <br>
-      <li><a name="FordpassVehiclelogFileDelete">logFileDelete</a><br>
-        <i>only visible if current logfile exists</i><br>
-        Remove the current logfile.<br>
-        <br>
-        <code>
-          set &lt;name&gt; logFileDelete
-        </code>
-      </li>
-      <br>
-      <li><a name="FordpassVehiclelogFileCreateFileLogDevice">logFileCreateFileLogDevice</a><br>
-        Create a new <b>readonly</b>-mode <b>FileLog</b> device  in fhem matching this module's <b>logFilePattern</b>.<br>
-        <br>
-        <code>
-          set &lt;name&gt; logFileCreateFileLogDevice [&lt;fileLogName&gt;]
-        </code>
-        <br>
-        <br>
-        Parameter [&lt;fileLogName&gt;] is optionally - if empty <b>FileLog_&lt;name&gt;_Data</b> is used
-      </li>
-      <br>
-      <b><i>Debug-mode</i></b><br>
-      <br>
-      <li><a name="FordpassVehicledebugRefreshConfig">debugRefreshConfig</a><br>
-        Update the configuration.<br>
-        <br>
-        <code>
-          set &lt;name&gt; debugRefreshConfig
-        </code>
-      </li>
-      <br>
-      <li><a name="FordpassVehicledebugRefreshValues">debugRefreshValues</a><br>
-        Update the values.<br>
-        <br>
-        <code>
-          set &lt;name&gt; debugRefreshValues
-        </code>
-      </li>
-      <br>
-      <li><a name="FordpassVehicledebugRefreshState">debugRefreshState</a><br>
-        Update the state.<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehicledebugGetApplianceCommand">debugGetApplianceCommand</a><br>
-        <i>SenseGuard only</i><br>
-        Update the command-state.<br>
-        <br>
-        <code>
-          set &lt;name&gt; debugGetApplianceCommand
-        </code>
-      </li>
-      <br>
-      <li><a name="FordpassVehicledebugForceUpdate">debugForceUpdate</a><br>
-        Forced update of last measurements (includes debugOverrideCheckTDT and debugResetProcessedMeasurementTimestamp).<br>
-        <br>
-        <code>
-          set &lt;name&gt; debugForceUpdate
-        </code>
-      </li>
-      <br>
-      <li><a name="FordpassVehicledebugOverrideCheckTDT">debugOverrideCheckTDT</a><br>
-        <br>
-        <code>
-          set &lt;name&gt; debugOverrideCheckTDT
-        </code>
-        <br>
-        <br>
-        If <b>0</b> (default) TDT check is done<br>
-        If <b>1</b> no TDT check is done so poll data each configured interval<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehicledebugResetProcessedMeasurementTimestamp">debugResetProcessedMeasurementTimestamp</a><br>
-        Reset ProcessedMeasurementTimestamp to force complete update of measurements.<br>
-        <br>
-        <code>
-          set &lt;name&gt; debugResetProcessedMeasurementTimestamp
-        </code>
-      </li>
     </ul>
     <br>
     <a name="FordpassVehicleattr"></a><b>Attributes</b><br>
     <ul>
-      <li><a name="FordpassVehicleinterval">interval</a><br>
-        Interval in seconds to poll for locations, rooms and appliances.
-        The default value is 60 seconds for SenseGuard and 600 seconds for Sense.
+      <li><a name="FordpassVehicleintervalslow">intervalslow</a><br>
+        Interval in seconds to poll for valeus.
+      </li>
+      <br>
+      <li><a name="FordpassVehicleintervalfast">intervalfast</a><br>
+        Interval in seconds to poll for vales .
       </li>
       <br>
       <li><a name="FordpassVehicledisable">disable</a><br>
         If <b>0</b> (default) then FordpassVehicle is <b>enabled</b>.<br>
-        If <b>1</b> then FordpassVehicle is <b>disabled</b> - no communication to the grohe cloud will be done.<br>
+        If <b>1</b> then FordpassVehicle is <b>disabled</b> - no communication to the Ford-Cloud will be done.<br>
       </li>
       <br>
       <li><a name="FordpassVehicledebug">debug</a><br>
@@ -3312,159 +3142,40 @@ sub FordpassVehicle_GetHTMLLocation($)
         If <b>1</b> if communication fails the json-payload of incoming telegrams is set to a reading.<br>
       </li>
       <br>
-      <b><i>LogFile-Mode</i></b><br>
-      <i>Additional internals are shown</i><br>
-      <br>
-      <li><a name="FordpassVehiclelogFileEnabled">logFileEnabled</a><br>
-        If <b>0</b> (default) no own logfile is written<br>
-        If <b>1</b> measurement data is additionally written to own logfile<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehiclelogFilePattern">logFilePattern</a><br>
-        Pattern to generate filename of the own logfile.<br>
-        <br>
-        Default: <b>%L/&lt;name&gt;-Data-%Y-%m.log</b><br>
-        <br>
-        The &lt;name&gt;-wildcard is replaced by the modules name.<br>
-        The pattern string may contain %-wildcards of the POSIX strftime function of the underlying OS (see your strftime manual). Common used wildcards are:<br>
-        <ul>
-          <li>%d day of month (01..31)</li>
-          <li>%m month (01..12)</li>
-          <li>%Y year (1970...)</li>
-          <li>%w day of week (0..6); 0 represents Sunday</li>
-          <li>%j day of year (001..366)</li>
-          <li>%U week number of year with Sunday as first day of week (00..53)</li>
-          <li>%W week number of year with Monday as first day of week (00..53)</li>
-        </ul><br>
-        FHEM also replaces %L by the value of the global logdir attribute.<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehiclelogFileFormat">logFileFormat</a><br>
-        Format of the data writen to the logfile.<br>
+      <li><a name="FordpassVehiclegenericReadings">genericReadings</a><br>
+        Control wich readings are shown.
         <ul>
           <li>
-            <b>Measurement</b> (Default) - each measurement is written with all it's measurevalues to one line<br>  
-            Format: <b>&lt;timestamp&gt; &lt;devicename&gt; Measurement: &lt;measurevalue_1&gt; &lt;measurevalue_2&gt; .. &lt;measurevalue_n&gt;</b>
+          <b>none</b> - (default) some certain values are mapped to a reading 
           </li>
           <li>
-            <b>MeasureValue</b> - each measurevalue is written to a seperate line<br>
-            Format: <b>&lt;timestamp&gt; &lt;devicename&gt; &lt;readingname&gt;: &lt;value&gt;</b>
+          <b>valid</b> - all valid json entries are mapped to a reading
           </li>
-        </ul><br>
+          <li>
+          <b>full</b> - all json entries are mapped to a reading
+          </li>
+        </ul>
       </li>
       <br>
-      <li><a name="FordpassVehiclelogFileGetDataStartDate">logFileGetDataStartDate</a><br>
-        Set the local start date for the command <b>logFileGetHistoricData</b><br>
-        If this attribute is deleted or not set then <b>ApplianceInstallationDate</b> is used for start date.<br>
-        <br>
-        Format is: <b>2021-11-20</b> or <b>2021-11-20T05:42:34</b><br>
-      </li>
-      <br>
-      <b><i>SenseGuard-only</i></b><br>
-      <i>Only visible for SenseGuard appliance</i><br>
-      <br>
-      <li><a name="FordpassVehicleoffsetTotalEnergyCost">offsetTotalEnergyCost</a><br>
-        Offset value for calculating reading TotalEnergyCost.<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehicleoffsetTotalWaterCost">offsetTotalWaterCost</a><br>
-        Offset value for calculating reading TotalWaterCost.<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehicleoffsetTotalWaterConsumption">offsetTotalWaterConsumption</a><br>
-        Offset value for calculating reading TotalWaterConsumption.<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehicleoffsetTotalHotWaterShare">offsetTotalHotWaterShare</a><br>
-        Offset value for calculating reading TotalHotWaterShare.<br>
-      </li>
     </ul><br>
     <br>
-    <a name="FordpassVehiclereadings"></a><b>Readings</b><br>
-    <ul>
-      <li><a name="FordpassVehicleMeasurementDataTimestamp">MeasurementDataTimestamp</a><br>
-        Example: 001637985182 2021-11-27T04:53:26.000+01:00<br>
-        This reading's value consists of two parts: format version and timestamp in seconds and human readable timestamp in utc format<br>
-        <b>00</b> first two chars are the format version information<br>
-        <b>1637985182</b> the following ten chars are the timestamp in seconds<br>
-        space as delimiter<br>
-        <b>2021-11-27T04:53:26.000+01:00</b> timestamp in utc format<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehicleMeasurementHumidity">MeasurementHumidity</a><br>
-        Example: 00163798518248<br>
-        This reading's value contains a number that consists of version, timestamp in seconds and value<br>
-        <b>00</b> first two chars are the format version information<br>
-        <b>1637985182</b> following ten chars are the timestamp in seconds<br>
-        <b>48</b> the rest is the measurement value<br>
-      </li>
-      <br>
-      <li><a name="FordpassVehicleMeasurementTemperature">MeasurementTemperature</a><br>
-        Example: 00163798518216.9<br>
-        This reading's value contains a number that consists of version, timestamp in seconds and value<br>
-        <b>00</b> first two chars are the format version information<br>
-        <b>1637985182</b> following ten chars are the timestamp in seconds<br>
-        <b>16.9</b> the rest is the measurement value<br>
-      </li>
-    </ul><br>
-    <br>
-    <a name="FordpassVehicleexample"></a><b>Plot Example</b><br>
-    <br>
-    Here is an example of a <b>gplotfile</b> using the included postFn <b>FordpassVehicle_PostFn</b> to split the data of the readings MeasurementTemperature and MeasurementHumidity.<br>
-    To use this gplotfile you have to define a <b><a href="https://wiki.fhem.de/wiki/LogProxy">logProxy</a></b> device.<br>
-    <br>
-    Just replace <b>FileLog_KG_Heizraum_Sense</b> with your <b><a href="https://wiki.fhem.de/wiki/FileLog">FileLog</a></b> device containing the Data of the readings MeasurementTemperature and MeasurementHumidity.<br>
-    <br>
-    <code>
-      # Created by FHEM/98_SVG.pm, 2021-11-26 09:03:29<br>
-      set terminal png transparent size &lt;SIZE&gt; crop<br>
-      set output '&lt;OUT&gt;.png'<br>
-      set xdata time<br>
-      set timefmt "%Y-%m-%d_%H:%M:%S"<br>
-      set xlabel " "<br>
-      set title '&lt;TL&gt;'<br>
-      set ytics<br>
-      set y2tics<br>
-      set grid<br>
-      set ylabel "Humidity"<br>
-      set y2label "Temperature"<br>
-      set yrange [40:60]<br>
-      set y2range [10:20]<br>
-      <br>
-      #logProxy FileLog:FileLog_KG_Heizraum_Sense,postFn='FordpassVehicle_PostFn':4:KG_Heizraum_Sense.MeasurementTemperature\x3a::<br>
-      #logProxy FileLog:FileLog_KG_Heizraum_Sense,postFn='FordpassVehicle_PostFn':4:KG_Heizraum_Sense.MeasurementHumidity\x3a::<br>
-      <br>
-      plot "&lt;IN&gt;" using 1:2 axes x1y2 title 'Temperature' ls l0 lw 1 with lines,\<br>
-           "&lt;IN&gt;" using 1:2 axes x1y1 title 'Humidity' ls l2 lw 1 with lines<br>
-    </code>
-    <br>
-    <a name="FordpassVehiclelogfilemode"></a><b>LogFile-Mode</b><br>
-    <br>
-    With enabled <b>LogFile-Mode</b> this module is writing new measurevalues additionally to an own logfile with consistent timestamp-value-combinations.<br>
-    <br>
-    To access the logfile from within FHEM in your known way - i.E. from within a plot - you can create a <a href="#FileLog">FileLog</a> device in <b>readonly</b> mode.<br>
-    <br>
-    Here is an example:<br>
-    <br>
-    <code>
-      defmod FileLog_EG_Hauswirtschaftsraum_Sense_Data FileLog ./log/EG_Hauswirtschaftsraum_Sense-Data-%Y-%m.log <b>readonly</b><br>
-    </code>
 </ul>
 
 =end html
 
 =for :application/json;q=META.json 74_FordpassVehicle.pm
 {
-  "abstract": "Modul to control GroheOndusSmart Devices",
+  "abstract": "Modul wich represents Fordpass Vehicle",
   "x_lang": {
     "de": {
-      "abstract": "Modul zur Steuerung von GroheOndusSmart Ger&aumlten"
+      "abstract": "Modul, das ein Fordpass Vehicle darstellt"
     }
   },
   "keywords": [
     "fhem-mod-device",
     "fhem-core",
-    "GroheOndus",
+    "Ford",
+    "Fordpass",
     "Smart"
   ],
   "release_status": "stable",
