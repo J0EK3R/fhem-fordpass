@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "1.0.0";
+my $VERSION = "1.0.1";
 
 use strict;
 use warnings;
@@ -853,8 +853,9 @@ sub FordpassVehicle_Update($)
       # serial call:
       #my $getRecalls              = sub { FordpassVehicle_GetRecalls($hash); };
       my $getFuelConsumptionInfo  = sub { FordpassVehicle_GetFuelConsumptionInfo($hash); };
-      my $getCapability           = sub { FordpassVehicle_GetCapability($hash, $getFuelConsumptionInfo); };
-      my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getCapability); };
+#      my $getCapability           = sub { FordpassVehicle_GetCapability($hash, $getFuelConsumptionInfo); };
+#      my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getCapability); };
+      my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getFuelConsumptionInfo); };
       my $getStateV2              = sub { FordpassVehicle_GetStatusV2($hash, $getStateV4); };
       my $refreshStateV2          = sub { FordpassVehicle_RefreshStatusV2($hash, $getStateV2); };
       my $getDetails              = sub { FordpassVehicle_GetDetails($hash, $refreshStateV2); };
@@ -864,8 +865,9 @@ sub FordpassVehicle_Update($)
     {
       #my $getRecalls              = sub { FordpassVehicle_GetRecalls($hash); };
       my $getFuelConsumptionInfo  = sub { FordpassVehicle_GetFuelConsumptionInfo($hash); };
-      my $getCapability           = sub { FordpassVehicle_GetCapability($hash, $getFuelConsumptionInfo); };
-      my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getCapability); };
+#      my $getCapability           = sub { FordpassVehicle_GetCapability($hash, $getFuelConsumptionInfo); };
+#      my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getCapability); };
+      my $getStateV4              = sub { FordpassVehicle_GetStatusV4($hash, $getFuelConsumptionInfo); };
       my $getStateV2              = sub { FordpassVehicle_GetStatusV2($hash, $getStateV4); };
       #my $refreshStateV2          = sub { FordpassVehicle_RefreshStatusV2($hash, $getStateV2); };
       my $getDetails              = sub { FordpassVehicle_GetDetails($hash, $getStateV2); };
@@ -2224,6 +2226,9 @@ sub FordpassVehicle_GetStatusV4($;$$)
 # FordpassVehicle_GetCapability( $hash, $callbackSuccess, $callbackFail )
 sub FordpassVehicle_GetCapability($;$$)
 {
+  # since 2022.05.10 the endpoint doesn't exist anymore. -> error 404 not found
+  #
+  
   my ( $hash, $callbackSuccess, $callbackFail ) = @_;
   my $name    = $hash->{NAME};
 

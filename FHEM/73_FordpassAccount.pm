@@ -30,7 +30,7 @@
 
 package main;
 
-my $VERSION = "1.0.0";
+my $VERSION = "1.0.1";
 
 use strict;
 use warnings;
@@ -275,7 +275,7 @@ sub FordpassAccount_Attr(@)
   # Attribute "disable"
   if ( $attrName eq "disable" )
   {
-    if ( $cmd eq "set" and 
+    if ($cmd eq "set" and 
       $attrVal eq "1" )
     {
       Log3($name, 3, "FordpassAccount_Attr($name) - disabled");
@@ -1743,6 +1743,11 @@ sub FordpassAccount_RequestErrorHandling($$$)
     {
       #$errorMsg = "wrong password";
       #$leftRetries = 0; # no retry
+    }
+    elsif( $param->{code} == 404 ) ### not Found
+    {
+      $errorMsg = "error " . $param->{code};
+      $leftRetries = 0; # no retry
     }
     elsif( $param->{code} == 429 ) ### To many requests
     {
